@@ -5,7 +5,7 @@ import { getSupabaseClient } from "@/lib/supabaseClient";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
-  parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, todayISO,
+  parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
 } from "@/lib/nutrition";
 
 function downloadText(filename, text) {
@@ -129,11 +129,17 @@ export default function Dashboard() {
       setMealError("⚠ Tidak ada baris yang dikenali. Pastikan ada kolom date dan minimal satu kolom gizi.");
       return;
     }
-    const rows = parsed.map((r) => ({ ...r, user_id: user.id }));
+    const { unique, duplicateCount } = dedupeMeals(meals, parsed);
+    if (unique.length === 0) {
+      setMealError(`⚠ Semua ${parsed.length} baris sudah ada sebelumnya (tanggal + nama menu sama). Tidak ada yang ditambahkan.`);
+      return;
+    }
+    const rows = unique.map((r) => ({ ...r, user_id: user.id }));
     const { data, error } = await supabase.from("meals").insert(rows).select();
     if (error) { setMealError("⚠ " + error.message); return; }
     setMeals((prev) => [...prev, ...(data || [])]);
-    setMealFileName(`✓ ${file.name} ditambahkan · total ${meals.length + (data?.length || 0)} baris menu`);
+    const dupNote = duplicateCount > 0 ? ` · ${duplicateCount} baris duplikat dilewati` : "";
+    setMealFileName(`✓ ${file.name} ditambahkan · total ${meals.length + (data?.length || 0)} baris menu${dupNote}`);
   }
 
   async function handleVitFile(file) {
