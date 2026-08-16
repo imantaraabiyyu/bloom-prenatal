@@ -7,6 +7,7 @@ import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
   parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
+  statusForPct,
 } from "@/lib/nutrition";
 
 function downloadText(filename, text) {
@@ -207,15 +208,21 @@ export default function Dashboard() {
   const pcts = activeNutrients.map((n) => (targets[n] ? (totals[n] || 0) / targets[n] * 100 : 0));
   const metCount = pcts.filter((p) => p >= 100).length;
   const avg = pcts.length ? pcts.reduce((a, b) => a + Math.min(b, 100), 0) / pcts.length : 0;
-  const statusClass = avg >= 85 ? "status-good" : avg >= 60 ? "status-mid" : "status-low";
-  const tagline = avg >= 85 ? "Gizi hari ini sudah mekar penuh 🌸"
-    : avg >= 60 ? "Sudah lumayan, tinggal sedikit lagi"
+  const overallStatus = statusForPct(avg);
+  const statusClass = "status-" + overallStatus.key;
+  const tagline = overallStatus.key === "good" ? "Gizi hari ini sudah mekar penuh 🌸"
+    : overallStatus.key === "mid" ? "Sudah lumayan, tinggal sedikit lagi"
     : "Masih ada beberapa nutrisi yang perlu dilengkapi";
   const lowestIdx = pcts.length ? pcts.indexOf(Math.min(...pcts)) : -1;
   const lowestLabel = lowestIdx >= 0 ? NUTRIENT_META[activeNutrients[lowestIdx]].label : "—";
 
-  // rings geometry
-  const size = 320, center = size / 2, baseRadius = 44, ringGap = 22, strokeWidth = 13;
+  // rings geometry — cap concurrent rings at 3 (same as Apple Watch's activity
+  // rings): color now marks status (tercukupi/hampir/kurang), not identity, but
+  // concentric arcs at different radii are still hard to compare by eye once
+  // there are more than a few, so the rest live in the legend + detail list below.
+  const size = 320, center = size / 2, baseRadius = 50, ringGap = 28, strokeWidth = 16;
+  const ringNutrients = activeNutrients.slice(0, 3);
+  const overflowCount = activeNutrients.length - ringNutrients.length;
 
   // trend geometry
   const trendData = datesWithMeals.map((d) => {
@@ -323,32 +330,55 @@ export default function Dashboard() {
               <p>Belum ada data. Unggah menu hari ini untuk melihat cincin gizinya.</p>
             </div>
           ) : (
-            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="rings-svg">
-              {activeNutrients.map((key, i) => {
-                const radius = baseRadius + i * ringGap;
-                const circumference = 2 * Math.PI * radius;
-                const value = totals[key] || 0;
-                const target = targets[key];
-                const pct = target ? value / target : 0;
-                const drawPct = Math.min(pct, 1);
-                const meta = NUTRIENT_META[key];
-                return (
-                  <g key={key}>
-                    <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(243,237,233,0.09)" strokeWidth={strokeWidth} />
-                    <circle
-                      cx={center} cy={center} r={radius} fill="none" stroke={meta.color} strokeWidth={strokeWidth}
-                      strokeDasharray={`${circumference * drawPct} ${circumference}`} strokeLinecap="round"
-                      transform={`rotate(-90 ${center} ${center})`} opacity={pct < 0.6 ? 0.75 : 1}
-                    />
-                    {pct > 1.02 && (
-                      <circle cx={center + radius * Math.cos(-Math.PI / 2)} cy={center + radius * Math.sin(-Math.PI / 2)} r={strokeWidth / 2.6} fill="#F3EDE9" />
-                    )}
-                  </g>
-                );
-              })}
-              <text x={center} y={center - 6} textAnchor="middle" fill="#F3EDE9" fontFamily="IBM Plex Mono, monospace" fontSize="13">{currentDate}</text>
-              <text x={center} y={center + 16} textAnchor="middle" fill="#a591a3" fontSize="10">{activeNutrients.length} nutrisi dilacak</text>
-            </svg>
+            <>
+              <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="rings-svg">
+                {ringNutrients.map((key, i) => {
+                  const radius = baseRadius + i * ringGap;
+                  const circumference = 2 * Math.PI * radius;
+                  const value = totals[key] || 0;
+                  const target = targets[key];
+                  const frac = target ? value / target : 0;
+                  const drawPct = Math.min(frac, 1);
+                  const status = statusForPct(frac * 100);
+                  return (
+                    <g key={key}>
+                      <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(243,237,233,0.09)" strokeWidth={strokeWidth} />
+                      <circle
+                        cx={center} cy={center} r={radius} fill="none" stroke={status.color} strokeWidth={strokeWidth}
+                        strokeDasharray={`${circumference * drawPct} ${circumference}`} strokeLinecap="round"
+                        transform={`rotate(-90 ${center} ${center})`}
+                      />
+                      {frac > 1.02 && (
+                        <circle cx={center + radius * Math.cos(-Math.PI / 2)} cy={center + radius * Math.sin(-Math.PI / 2)} r={strokeWidth / 2.6} fill="#F3EDE9" />
+                      )}
+                    </g>
+                  );
+                })}
+                <text x={center} y={center - 6} textAnchor="middle" fill="#F3EDE9" fontFamily="IBM Plex Mono, monospace" fontSize="13">{currentDate}</text>
+                <text x={center} y={center + 16} textAnchor="middle" fill="#a591a3" fontSize="10">{ringNutrients.length} nutrisi utama</text>
+              </svg>
+
+              <div className="ring-legend">
+                {ringNutrients.map((key) => {
+                  const meta = NUTRIENT_META[key];
+                  const value = totals[key] || 0;
+                  const target = targets[key];
+                  const pct = target ? (value / target) * 100 : 0;
+                  const status = statusForPct(pct);
+                  return (
+                    <div className="ring-legend-item" key={key}>
+                      <span className="ring-legend-dot" style={{ background: status.color }} />
+                      <span className="ring-legend-name">{meta.label}</span>
+                      <span className="ring-legend-value">{Math.round(value)}/{target}{meta.unit}</span>
+                      <span className="ring-legend-pct" style={{ color: status.color }}>{Math.round(pct)}%</span>
+                    </div>
+                  );
+                })}
+                {overflowCount > 0 && (
+                  <a className="ring-legend-more" href="#nutrient-detail">+{overflowCount} nutrisi lainnya di bawah ↓</a>
+                )}
+              </div>
+            </>
           )}
           {dates.length > 0 && (
             <div className="day-nav">
@@ -386,7 +416,7 @@ export default function Dashboard() {
 
         {/* Nutrient list */}
         {currentDate && activeNutrients.length > 0 && (
-          <div className="panel full">
+          <div className="panel full" id="nutrient-detail">
             <h2>{currentDate} — rincian per nutrisi</h2>
             {visibleNutrients.map((key) => {
               const meta = NUTRIENT_META[key];
@@ -457,18 +487,17 @@ export default function Dashboard() {
                   const t = dayTotals(d);
                   const p = activeNutrients.map((n) => (targets[n] ? (t[n] || 0) / targets[n] * 100 : 0));
                   const a = p.length ? p.reduce((x, y) => x + Math.min(y, 100), 0) / p.length : 0;
-                  const color = a >= 85 ? "#8FAE8B" : a >= 60 ? "#E3B65E" : "#C77B7B";
-                  const statusText = a >= 85 ? "Tercukupi" : a >= 60 ? "Hampir" : "Kurang";
+                  const st = statusForPct(a);
                   return (
                     <tr key={d}>
                       <td>{d}</td>
                       <td>
                         <div className="hist-bar-cell">
-                          <div className="hist-bar-track"><div className="hist-bar-fill" style={{ width: `${Math.min(a, 100)}%`, background: color }} /></div>
+                          <div className="hist-bar-track"><div className="hist-bar-fill" style={{ width: `${Math.min(a, 100)}%`, background: st.color }} /></div>
                           <span style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 11, color: "var(--text-dimmer)" }}>{Math.round(a)}%</span>
                         </div>
                       </td>
-                      <td><span style={{ color, fontSize: 12, fontWeight: 600 }}>{statusText}</span></td>
+                      <td><span style={{ color: st.color, fontSize: 12, fontWeight: 600 }}>{st.label}</span></td>
                     </tr>
                   );
                 })}
