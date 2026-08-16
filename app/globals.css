@@ -210,6 +210,31 @@ button, input { font-family: inherit; }
 .journal-entry-remove:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
 .journal-entry-note { margin: 0; font-size: 13.5px; color: #e8dde5; line-height: 1.6; white-space: pre-wrap; }
 
+/* ---------- Journal attachments (photo/video/voice note) ---------- */
+.attach-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.attach-btn { position: relative; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 9px 14px; border-radius: 100px; border: 1px solid rgba(243,237,233,0.18); background: transparent; color: var(--text-dim); cursor: pointer; overflow: hidden; }
+.attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+.attach-btn input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.attach-btn.recording { border-color: var(--rose); color: var(--rose); background: rgba(199,123,99,0.1); animation: pulse-rec 1.4s ease-in-out infinite; }
+@keyframes pulse-rec { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+.attach-hint { font-size: 11px; color: var(--text-faint); margin-top: -2px; }
+
+.pending-attachments { display: flex; flex-wrap: wrap; gap: 10px; }
+.pending-item { position: relative; width: 92px; }
+.pending-item img, .pending-item video { width: 92px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(243,237,233,0.14); display: block; background: rgba(0,0,0,0.2); }
+.pending-item.pending-voice { width: auto; }
+.pending-item.pending-voice audio { height: 36px; max-width: 240px; }
+.pending-item button { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(28,18,25,0.9); color: var(--text); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.pending-item button:hover { background: var(--rose); color: #2B1B2E; }
+
+.entry-attachments { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.entry-attachment { position: relative; }
+.entry-attachment img, .entry-attachment video { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(243,237,233,0.14); display: block; }
+.entry-attachment audio { height: 36px; max-width: 260px; }
+.entry-attachment-broken { width: 120px; height: 60px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11px; color: var(--text-faint); background: rgba(243,237,233,0.05); border-radius: 10px; padding: 6px; }
+.entry-attachment-remove { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(28,18,25,0.9); color: var(--text); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.entry-attachment-remove:hover { background: var(--rose); color: #2B1B2E; }
+
 .disclaimer { max-width: 920px; margin: 26px auto 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
 .center-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
 
@@ -231,4 +256,9 @@ button, input { font-family: inherit; }
   .manual-form-actions button { width: 100%; }
 
   .summary-row { grid-template-columns: repeat(2, 1fr); }
+
+  .attach-btn { flex: 1 1 auto; justify-content: center; }
+  .pending-item, .pending-item img, .pending-item video { width: 78px; height: 78px; }
+  .entry-attachment img, .entry-attachment video { width: 96px; height: 96px; }
+  .entry-attachment-broken { width: 96px; }
 }

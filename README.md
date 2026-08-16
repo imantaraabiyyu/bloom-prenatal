@@ -14,13 +14,17 @@ pribadi/keluarga, dan tetap di-deploy ke Vercel.
    (mis. Singapore), buat password database (simpan baik-baik, jarang dipakai manual).
 3. Tunggu ~1-2 menit sampai project siap.
 
-### 2. Buat tabel database
+### 2. Buat tabel database + storage bucket jurnal
 
 1. Di dashboard Supabase, buka **SQL Editor** (ikon di sidebar kiri) → **New query**.
 2. Copy-paste seluruh isi file `supabase/schema.sql` yang ada di folder ini.
-3. Klik **Run**. Ini akan membuat 5 tabel (`profiles`, `meals`, `vitamins`,
-   `vitamin_checks`, `journal_entries`) lengkap dengan Row Level Security —
-   jadi tiap pengguna hanya bisa lihat & ubah datanya sendiri.
+3. Klik **Run**. Ini akan membuat 6 tabel (`profiles`, `meals`, `vitamins`,
+   `vitamin_checks`, `journal_entries`, `journal_attachments`) lengkap dengan
+   Row Level Security — jadi tiap pengguna hanya bisa lihat & ubah datanya
+   sendiri — **dan** sebuah Storage bucket privat `journal-media` (untuk
+   foto/video/voice note di jurnal) dengan batas 45MB per file dan RLS yang
+   sama (per-pemilik). Aman dijalankan ulang kalau nanti ada update skema —
+   tabel & bucket yang sudah ada tidak akan tertimpa/hilang datanya.
 
 ### 3. Ambil API key
 
@@ -80,14 +84,14 @@ app/
   page.js               → redirect ke /dashboard atau /login
   login/page.js          → form login & daftar (Supabase Auth)
   dashboard/page.js       → dashboard utama (rings, checklist vitamin, tren, riwayat)
-  dashboard/journal/page.js → jurnal harian (catatan bebas + mood, teks saja)
+  dashboard/journal/page.js → jurnal harian (catatan + mood + foto/video/voice note)
   globals.css             → tema visual (dark plum)
 lib/
   supabaseClient.js      → koneksi ke Supabase
   nutrition.js           → target gizi per trimester, parser CSV, dll
-  journal.js             → daftar mood untuk jurnal
+  journal.js             → daftar mood + konstanta lampiran jurnal (limit ukuran/jumlah file)
 supabase/
-  schema.sql              → skema tabel + Row Level Security
+  schema.sql              → skema tabel + storage bucket + Row Level Security
 ```
 
 ## Catatan
@@ -99,7 +103,12 @@ supabase/
 - Data sekarang tersimpan di Supabase (Postgres) dengan Row Level Security,
   jauh lebih aman daripada versi localStorage sebelumnya — tapi tetap bukan
   aplikasi medis resmi, hanya alat bantu pencatatan pribadi.
-- Jurnal (`journal_entries`) saat ini teks saja, belum ada lampiran foto/video.
-  Kalau nanti mau ditambah, Supabase Storage (free tier: 1GB storage, 5GB
-  bandwidth/bulan, maks ~50MB per file) bisa dipakai — foto aman, video perlu
-  diperhatikan ukurannya.
+- Jurnal (`journal_entries` + `journal_attachments`) mendukung foto, video,
+  dan voice note (rekam langsung dari mic browser). Filenya disimpan di
+  Storage bucket privat `journal-media` — cuma bisa diakses lewat signed URL
+  milik pemiliknya sendiri, bukan tautan publik. Batasnya (ditegakkan di
+  server, bukan cuma di browser): maks 45MB per file, maks 10 lampiran per
+  catatan, rekaman voice note otomatis berhenti di 10 menit. Free tier
+  Supabase Storage sendiri: 1GB total storage, 5GB bandwidth/bulan — video
+  paling cepat menghabiskan kuota, jadi pantau pemakaiannya kalau sering
+  upload video.
