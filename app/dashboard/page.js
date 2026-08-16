@@ -39,6 +39,26 @@ export default function Dashboard() {
   const mealDropRef = useRef(null);
   const vitDropRef = useRef(null);
 
+  // manual "add meal" form
+  const [mealFormOpen, setMealFormOpen] = useState(false);
+  const [mealFormDate, setMealFormDate] = useState(todayISO());
+  const [mealFormName, setMealFormName] = useState("");
+  const [mealFormValues, setMealFormValues] = useState({});
+  const [mealFormSaving, setMealFormSaving] = useState(false);
+  const [mealFormError, setMealFormError] = useState("");
+
+  // manual "add vitamin" form
+  const [vitFormOpen, setVitFormOpen] = useState(false);
+  const [vitFormName, setVitFormName] = useState("");
+  const [vitFormValues, setVitFormValues] = useState({});
+  const [vitFormSaving, setVitFormSaving] = useState(false);
+  const [vitFormError, setVitFormError] = useState("");
+
+  // quick water log
+  const [waterAmount, setWaterAmount] = useState("");
+  const [waterSaving, setWaterSaving] = useState(false);
+  const [waterError, setWaterError] = useState("");
+
   // ---------------- bootstrap ----------------
   useEffect(() => {
     if (!supabase) { router.replace("/login"); return; }
@@ -115,6 +135,11 @@ export default function Dashboard() {
 
   const totals = currentDate ? dayTotals(currentDate) : {};
   const datesWithMeals = dates.filter((d) => meals.some((r) => r.date === d));
+  const todaysMeals = currentDate ? meals.filter((r) => r.date === currentDate) : [];
+  const waterTotal = totals.water_ml || 0;
+  const waterTarget = targets.water_ml;
+  const waterPct = waterTarget ? (waterTotal / waterTarget) * 100 : 0;
+  const waterStatus = statusForPct(waterPct);
 
   // ---------------- actions ----------------
   async function changeTrimester(t) {
@@ -162,6 +187,94 @@ export default function Dashboard() {
     if (error) { setVitError("⚠ " + error.message); return; }
     setVitamins((prev) => [...prev, ...(data || [])]);
     setVitFileName(`✓ ${file.name} · ${data?.length || 0} vitamin ditambahkan`);
+  }
+
+  // ---------------- manual meal entry ----------------
+  function openMealForm() {
+    setMealFormOpen(true);
+    setMealFormDate(currentDate || todayISO());
+    setMealFormName("");
+    setMealFormValues({});
+    setMealFormError("");
+  }
+
+  function closeMealForm() {
+    setMealFormOpen(false);
+    setMealFormError("");
+  }
+
+  async function handleAddMeal() {
+    setMealFormError("");
+    const name = mealFormName.trim();
+    if (!name) { setMealFormError("⚠ Isi dulu nama menunya."); return; }
+    if (!mealFormDate) { setMealFormError("⚠ Pilih tanggal untuk menu ini."); return; }
+    setMealFormSaving(true);
+    const row = { user_id: user.id, date: mealFormDate, meal: name };
+    NUTRIENT_ORDER.forEach((n) => {
+      const v = parseFloat(mealFormValues[n]);
+      row[n] = isNaN(v) ? 0 : v;
+    });
+    const { data, error } = await supabase.from("meals").insert(row).select().maybeSingle();
+    setMealFormSaving(false);
+    if (error) { setMealFormError("⚠ " + error.message); return; }
+    setMeals((prev) => [...prev, data]);
+    setMealFormName("");
+    setMealFormValues({});
+  }
+
+  async function handleDeleteMeal(id) {
+    setMeals((prev) => prev.filter((m) => m.id !== id));
+    await supabase.from("meals").delete().eq("id", id);
+  }
+
+  // ---------------- quick water log ----------------
+  async function addWater(amount) {
+    if (!currentDate || !amount || amount <= 0) return;
+    setWaterError("");
+    setWaterSaving(true);
+    const row = { user_id: user.id, date: currentDate, meal: "Air minum", water_ml: amount };
+    const { data, error } = await supabase.from("meals").insert(row).select().maybeSingle();
+    setWaterSaving(false);
+    if (error) { setWaterError("⚠ " + error.message); return; }
+    setMeals((prev) => [...prev, data]);
+  }
+
+  function handleWaterCustomAdd() {
+    const amt = parseFloat(waterAmount);
+    if (!amt || amt <= 0) { setWaterError("⚠ Masukkan jumlah ml yang valid."); return; }
+    addWater(amt);
+    setWaterAmount("");
+  }
+
+  // ---------------- manual vitamin entry ----------------
+  function openVitForm() {
+    setVitFormOpen(true);
+    setVitFormName("");
+    setVitFormValues({});
+    setVitFormError("");
+  }
+
+  function closeVitForm() {
+    setVitFormOpen(false);
+    setVitFormError("");
+  }
+
+  async function handleAddVitamin() {
+    setVitFormError("");
+    const name = vitFormName.trim();
+    if (!name) { setVitFormError("⚠ Isi dulu nama vitamin/suplemennya."); return; }
+    setVitFormSaving(true);
+    const row = { user_id: user.id, name };
+    NUTRIENT_ORDER.forEach((n) => {
+      const v = parseFloat(vitFormValues[n]);
+      row[n] = isNaN(v) ? 0 : v;
+    });
+    const { data, error } = await supabase.from("vitamins").insert(row).select().maybeSingle();
+    setVitFormSaving(false);
+    if (error) { setVitFormError("⚠ " + error.message); return; }
+    setVitamins((prev) => [...prev, data]);
+    setVitFormName("");
+    setVitFormValues({});
   }
 
   async function toggleVitaminCheck(vitaminId, checked) {
@@ -303,6 +416,43 @@ export default function Dashboard() {
               <code>fiber_g</code>, <code>water_ml</code>. Baris dengan tanggal sama akan dijumlahkan otomatis.
             </div>
 
+            <button className="manual-form-toggle" onClick={() => (mealFormOpen ? closeMealForm() : openMealForm())}>
+              {mealFormOpen ? "▲ Tutup form manual" : "+ Tambah menu manual"}
+            </button>
+            {mealFormOpen && (
+              <div className="manual-form">
+                <div className="manual-form-row">
+                  <input
+                    type="text" placeholder="Nama menu (mis. Nasi goreng)"
+                    value={mealFormName} onChange={(e) => setMealFormName(e.target.value)}
+                  />
+                  <input type="date" value={mealFormDate} onChange={(e) => setMealFormDate(e.target.value)} />
+                </div>
+                <div className="manual-form-grid">
+                  {NUTRIENT_ORDER.map((n) => {
+                    const meta = NUTRIENT_META[n];
+                    return (
+                      <div className="manual-form-field" key={n}>
+                        <label>{meta.label} ({meta.unit})</label>
+                        <input
+                          type="number" inputMode="decimal" min="0" step="any" placeholder="0"
+                          value={mealFormValues[n] ?? ""}
+                          onChange={(e) => setMealFormValues((prev) => ({ ...prev, [n]: e.target.value }))}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                {mealFormError && <div className="error-box">{mealFormError}</div>}
+                <div className="manual-form-actions">
+                  <button className="manual-form-save" onClick={handleAddMeal} disabled={mealFormSaving}>
+                    {mealFormSaving ? "Menyimpan…" : "Simpan menu"}
+                  </button>
+                  <button className="manual-form-cancel" onClick={closeMealForm}>Batal</button>
+                </div>
+              </div>
+            )}
+
             <div className="divider" />
 
             <h2>Vitamin dari dokter</h2>
@@ -319,6 +469,42 @@ export default function Dashboard() {
               Nilai gizi per vitamin bersifat contoh berdasarkan label umum — sesuaikan dengan
               kemasan asli dan anjuran dokter/apoteker kamu.
             </div>
+
+            <button className="manual-form-toggle" onClick={() => (vitFormOpen ? closeVitForm() : openVitForm())}>
+              {vitFormOpen ? "▲ Tutup form manual" : "+ Tambah vitamin manual"}
+            </button>
+            {vitFormOpen && (
+              <div className="manual-form">
+                <div className="manual-form-row">
+                  <input
+                    type="text" placeholder="Nama vitamin/suplemen (mis. Folamil Genio)"
+                    value={vitFormName} onChange={(e) => setVitFormName(e.target.value)}
+                  />
+                </div>
+                <div className="manual-form-grid">
+                  {NUTRIENT_ORDER.map((n) => {
+                    const meta = NUTRIENT_META[n];
+                    return (
+                      <div className="manual-form-field" key={n}>
+                        <label>{meta.label} ({meta.unit})</label>
+                        <input
+                          type="number" inputMode="decimal" min="0" step="any" placeholder="0"
+                          value={vitFormValues[n] ?? ""}
+                          onChange={(e) => setVitFormValues((prev) => ({ ...prev, [n]: e.target.value }))}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                {vitFormError && <div className="error-box">{vitFormError}</div>}
+                <div className="manual-form-actions">
+                  <button className="manual-form-save" onClick={handleAddVitamin} disabled={vitFormSaving}>
+                    {vitFormSaving ? "Menyimpan…" : "Simpan vitamin"}
+                  </button>
+                  <button className="manual-form-cancel" onClick={closeVitForm}>Batal</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -414,6 +600,55 @@ export default function Dashboard() {
           )}
         </div>
 
+        {/* Cairan + menu hari ini */}
+        {currentDate && (
+          <div className="panel full">
+            <h2>💧 Cairan — {currentDate}</h2>
+            <div className="water-widget">
+              <div className="water-widget-label">
+                <span>Cairan hari ini</span>
+                <span className="water-widget-value">{Math.round(waterTotal)}/{waterTarget}ml · {Math.round(waterPct)}%</span>
+              </div>
+              <div className="water-bar-track">
+                <div className="water-bar-fill" style={{ width: `${Math.min(waterPct, 100)}%`, background: waterStatus.color }} />
+              </div>
+              <div className="water-quick-row">
+                {[100, 200, 250, 500].map((ml) => (
+                  <button key={ml} className="water-btn" onClick={() => addWater(ml)} disabled={waterSaving}>+{ml}ml</button>
+                ))}
+              </div>
+              <div className="water-custom-row">
+                <input
+                  type="number" inputMode="decimal" min="0" step="any" placeholder="Jumlah ml lainnya"
+                  value={waterAmount} onChange={(e) => setWaterAmount(e.target.value)}
+                />
+                <button onClick={handleWaterCustomAdd} disabled={waterSaving}>Tambah</button>
+              </div>
+              {waterError && <div className="error-box">{waterError}</div>}
+            </div>
+
+            <div className="divider" />
+
+            <h2>🍽️ Menu yang sudah dimakan — {currentDate}</h2>
+            {todaysMeals.length === 0 ? (
+              <div className="meal-list-empty">Belum ada menu tercatat untuk tanggal ini. Unggah CSV atau tambah manual di panel kiri.</div>
+            ) : (
+              todaysMeals.map((m) => {
+                const detailParts = NUTRIENT_ORDER.filter((n) => m[n]).map((n) => `${NUTRIENT_META[n].label} ${m[n]}${NUTRIENT_META[n].unit}`);
+                return (
+                  <div className="meal-list-item" key={m.id}>
+                    <div className="meal-list-info">
+                      <div className="meal-list-name">{m.meal || "Tanpa nama"}</div>
+                      <div className="meal-list-detail">{detailParts.join(" · ") || "tanpa data gizi"}</div>
+                    </div>
+                    <button className="meal-list-remove" title="Hapus menu ini" onClick={() => handleDeleteMeal(m.id)}>✕</button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
         {/* Nutrient list */}
         {currentDate && activeNutrients.length > 0 && (
           <div className="panel full" id="nutrient-detail">
@@ -480,29 +715,31 @@ export default function Dashboard() {
         {datesWithMeals.length > 0 && (
           <div className="panel full">
             <h3>Ringkasan riwayat</h3>
-            <table className="hist-table">
-              <thead><tr><th>Tanggal</th><th style={{ width: "55%" }}>Rata-rata tercapai</th><th>Status</th></tr></thead>
-              <tbody>
-                {datesWithMeals.slice().reverse().map((d) => {
-                  const t = dayTotals(d);
-                  const p = activeNutrients.map((n) => (targets[n] ? (t[n] || 0) / targets[n] * 100 : 0));
-                  const a = p.length ? p.reduce((x, y) => x + Math.min(y, 100), 0) / p.length : 0;
-                  const st = statusForPct(a);
-                  return (
-                    <tr key={d}>
-                      <td>{d}</td>
-                      <td>
-                        <div className="hist-bar-cell">
-                          <div className="hist-bar-track"><div className="hist-bar-fill" style={{ width: `${Math.min(a, 100)}%`, background: st.color }} /></div>
-                          <span style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 11, color: "var(--text-dimmer)" }}>{Math.round(a)}%</span>
-                        </div>
-                      </td>
-                      <td><span style={{ color: st.color, fontSize: 12, fontWeight: 600 }}>{st.label}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="hist-table-wrap">
+              <table className="hist-table">
+                <thead><tr><th>Tanggal</th><th style={{ width: "55%" }}>Rata-rata tercapai</th><th>Status</th></tr></thead>
+                <tbody>
+                  {datesWithMeals.slice().reverse().map((d) => {
+                    const t = dayTotals(d);
+                    const p = activeNutrients.map((n) => (targets[n] ? (t[n] || 0) / targets[n] * 100 : 0));
+                    const a = p.length ? p.reduce((x, y) => x + Math.min(y, 100), 0) / p.length : 0;
+                    const st = statusForPct(a);
+                    return (
+                      <tr key={d}>
+                        <td>{d}</td>
+                        <td>
+                          <div className="hist-bar-cell">
+                            <div className="hist-bar-track"><div className="hist-bar-fill" style={{ width: `${Math.min(a, 100)}%`, background: st.color }} /></div>
+                            <span style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 11, color: "var(--text-dimmer)" }}>{Math.round(a)}%</span>
+                          </div>
+                        </td>
+                        <td><span style={{ color: st.color, fontSize: 12, fontWeight: 600 }}>{st.label}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
