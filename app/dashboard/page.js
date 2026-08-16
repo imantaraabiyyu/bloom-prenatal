@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
@@ -239,6 +240,10 @@ export default function Dashboard() {
         <div className="topbar-left">
           <div className="avatar">{(user?.email || "?").charAt(0).toUpperCase()}</div>
           <span className="user-name">{user?.email}</span>
+        </div>
+        <div className="topbar-nav">
+          <Link href="/dashboard" className="nav-link active">Dashboard</Link>
+          <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>

@@ -8,30 +8,35 @@ pribadi/keluarga, dan tetap di-deploy ke Vercel.
 ## Yang perlu disiapkan sebelum deploy
 
 ### 1. Buat project Supabase (gratis)
+
 1. Buka https://supabase.com → **Start your project** → daftar/masuk (bisa pakai GitHub).
 2. Klik **New project**, kasih nama bebas (mis. `bloom`), pilih region terdekat
    (mis. Singapore), buat password database (simpan baik-baik, jarang dipakai manual).
 3. Tunggu ~1-2 menit sampai project siap.
 
 ### 2. Buat tabel database
+
 1. Di dashboard Supabase, buka **SQL Editor** (ikon di sidebar kiri) → **New query**.
 2. Copy-paste seluruh isi file `supabase/schema.sql` yang ada di folder ini.
-3. Klik **Run**. Ini akan membuat 4 tabel (`profiles`, `meals`, `vitamins`,
-   `vitamin_checks`) lengkap dengan Row Level Security — jadi tiap pengguna
-   hanya bisa lihat & ubah datanya sendiri.
+3. Klik **Run**. Ini akan membuat 5 tabel (`profiles`, `meals`, `vitamins`,
+   `vitamin_checks`, `journal_entries`) lengkap dengan Row Level Security —
+   jadi tiap pengguna hanya bisa lihat & ubah datanya sendiri.
 
 ### 3. Ambil API key
+
 1. Di dashboard Supabase, buka **Project Settings → API**.
 2. Catat dua nilai ini:
    - **Project URL** (mis. `https://xxxxxxxxxxxx.supabase.co`)
    - **anon public key** (kunci panjang di bagian "Project API keys")
 
 ### 4. (Opsional tapi disarankan) Matikan konfirmasi email
+
 Supaya proses daftar akun langsung bisa dipakai tanpa perlu klik link di email:
+
 1. **Authentication → Providers → Email**.
 2. Matikan **"Confirm email"**.
-(Kalau dibiarkan aktif, setelah daftar pengguna harus klik link konfirmasi di
-inbox emailnya dulu sebelum bisa login — juga valid, cuma satu langkah ekstra.)
+   (Kalau dibiarkan aktif, setelah daftar pengguna harus klik link konfirmasi di
+   inbox emailnya dulu sebelum bisa login — juga valid, cuma satu langkah ekstra.)
 
 ## Coba di komputer sendiri dulu (opsional)
 
@@ -41,11 +46,13 @@ cp .env.local.example .env.local
 # lalu edit .env.local, isi dua nilai dari langkah 3 di atas
 npm run dev
 ```
+
 Buka `http://localhost:3000`.
 
 ## Deploy ke Vercel (gratis)
 
 **Lewat GitHub (disarankan):**
+
 1. Push seluruh folder ini ke repo GitHub baru.
 2. Buka https://vercel.com → **Add New → Project → Import Git Repository** → pilih repo ini.
 3. Sebelum klik Deploy, buka bagian **Environment Variables**, tambahkan:
@@ -56,6 +63,7 @@ Buka `http://localhost:3000`.
 5. Setelah live, kalau nanti ganti kode → `git push` → otomatis re-deploy.
 
 **Lewat CLI:**
+
 ```
 npm install -g vercel
 cd bloom-supabase
@@ -69,15 +77,17 @@ vercel
 
 ```
 app/
-  page.js            → redirect ke /dashboard atau /login
-  login/page.js       → form login & daftar (Supabase Auth)
-  dashboard/page.js    → dashboard utama (rings, checklist vitamin, tren, riwayat)
-  globals.css          → tema visual (dark plum)
+  page.js               → redirect ke /dashboard atau /login
+  login/page.js          → form login & daftar (Supabase Auth)
+  dashboard/page.js       → dashboard utama (rings, checklist vitamin, tren, riwayat)
+  dashboard/journal/page.js → jurnal harian (catatan bebas + mood, teks saja)
+  globals.css             → tema visual (dark plum)
 lib/
-  supabaseClient.js    → koneksi ke Supabase
-  nutrition.js         → target gizi per trimester, parser CSV, dll
+  supabaseClient.js      → koneksi ke Supabase
+  nutrition.js           → target gizi per trimester, parser CSV, dll
+  journal.js             → daftar mood untuk jurnal
 supabase/
-  schema.sql           → skema tabel + Row Level Security
+  schema.sql              → skema tabel + Row Level Security
 ```
 
 ## Catatan
@@ -89,3 +99,7 @@ supabase/
 - Data sekarang tersimpan di Supabase (Postgres) dengan Row Level Security,
   jauh lebih aman daripada versi localStorage sebelumnya — tapi tetap bukan
   aplikasi medis resmi, hanya alat bantu pencatatan pribadi.
+- Jurnal (`journal_entries`) saat ini teks saja, belum ada lampiran foto/video.
+  Kalau nanti mau ditambah, Supabase Storage (free tier: 1GB storage, 5GB
+  bandwidth/bulan, maks ~50MB per file) bisa dipakai — foto aman, video perlu
+  diperhatikan ukurannya.
