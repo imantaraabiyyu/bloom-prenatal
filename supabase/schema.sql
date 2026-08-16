@@ -54,7 +54,7 @@ create table if not exists public.vitamin_checks (
 );
 create index if not exists vitamin_checks_user_date_idx on public.vitamin_checks (user_id, date);
 
--- 5) Jurnal harian (catatan bebas + mood, teks saja — tanpa lampiran media)
+-- 5) Jurnal harian (catatan bebas + mood)
 create table if not exists public.journal_entries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
@@ -66,6 +66,47 @@ create table if not exists public.journal_entries (
 );
 create index if not exists journal_entries_user_date_idx on public.journal_entries (user_id, entry_date);
 
+-- 6) Lampiran jurnal (foto/video/voice note — banyak per entry)
+-- File aslinya disimpan di Storage bucket "journal-media" (dibuat di bawah);
+-- baris ini cuma menyimpan path + metadata-nya.
+create table if not exists public.journal_attachments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  entry_id uuid not null references public.journal_entries(id) on delete cascade,
+  kind text not null check (kind in ('photo','video','voice')),
+  storage_path text not null,
+  mime_type text,
+  size_bytes bigint,
+  created_at timestamptz not null default now()
+);
+create index if not exists journal_attachments_entry_idx on public.journal_attachments (entry_id);
+
+-- ================= STORAGE (foto/video/voice note jurnal) =================
+-- Bucket privat — file cuma bisa diakses lewat signed URL yang dibuat oleh
+-- pemiliknya sendiri, bukan URL publik. Path filenya WAJIB berbentuk
+-- "{user_id}/{entry_id}/{nama file}" karena RLS di bawah mengecek folder
+-- pertama = auth.uid() pengunggah (lihat lib/journal.js -> attachmentPath).
+--
+-- file_size_limit & allowed_mime_types ditegakkan oleh Supabase Storage API
+-- sendiri (bukan cuma validasi di browser) — jadi permintaan upload yang
+-- lebih besar dari 45MB atau bukan foto/video/audio akan ditolak duluan
+-- sebelum sempat tersimpan. Angka 47185920 = 45 * 1024 * 1024 bytes, harus
+-- sinkron dengan MAX_ATTACHMENT_MB di lib/journal.js kalau diubah.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('journal-media', 'journal-media', false, 47185920, array['image/*', 'video/*', 'audio/*'])
+on conflict (id) do update set
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+create policy "journal-media: owner select" on storage.objects for select
+  using (bucket_id = 'journal-media' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "journal-media: owner insert" on storage.objects for insert
+  with check (bucket_id = 'journal-media' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "journal-media: owner delete" on storage.objects for delete
+  using (bucket_id = 'journal-media' and (storage.foldername(name))[1] = auth.uid()::text);
+
 -- ================= ROW LEVEL SECURITY =================
 -- Setiap tabel hanya bisa diakses oleh pemiliknya (auth.uid() = user_id).
 
@@ -74,6 +115,7 @@ alter table public.meals enable row level security;
 alter table public.vitamins enable row level security;
 alter table public.vitamin_checks enable row level security;
 alter table public.journal_entries enable row level security;
+alter table public.journal_attachments enable row level security;
 
 create policy "profiles: owner select" on public.profiles for select using (auth.uid() = user_id);
 create policy "profiles: owner insert" on public.profiles for insert with check (auth.uid() = user_id);
@@ -98,3 +140,7 @@ create policy "journal_entries: owner select" on public.journal_entries for sele
 create policy "journal_entries: owner insert" on public.journal_entries for insert with check (auth.uid() = user_id);
 create policy "journal_entries: owner update" on public.journal_entries for update using (auth.uid() = user_id);
 create policy "journal_entries: owner delete" on public.journal_entries for delete using (auth.uid() = user_id);
+
+create policy "journal_attachments: owner select" on public.journal_attachments for select using (auth.uid() = user_id);
+create policy "journal_attachments: owner insert" on public.journal_attachments for insert with check (auth.uid() = user_id);
+create policy "journal_attachments: owner delete" on public.journal_attachments for delete using (auth.uid() = user_id);
