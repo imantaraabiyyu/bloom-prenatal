@@ -18,6 +18,11 @@ create table if not exists public.profiles (
   trimester text not null default 't2' check (trimester in ('t1','t2','t3')),
   created_at timestamptz not null default now()
 );
+-- HPHT (Hari Pertama Haid Terakhir) — satu-satunya tanggal yang disimpan;
+-- usia kehamilan, HPL (perkiraan lahir), dan progress-nya semua dihitung dari
+-- ini di lib/pregnancy.js, tidak disimpan terpisah (sama seperti target/status
+-- gizi yang selalu dihitung, bukan disimpan).
+alter table public.profiles add column if not exists hpht date;
 
 -- 2) Menu makan (riwayat harian)
 create table if not exists public.meals (
@@ -109,6 +114,36 @@ create table if not exists public.journal_attachments (
 );
 create index if not exists journal_attachments_entry_idx on public.journal_attachments (entry_id);
 
+-- 7) Daftar calon nama bayi
+create table if not exists public.baby_names (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  name text not null,
+  gender text check (gender in ('boy','girl','unisex')),
+  note text,
+  is_favorite boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists baby_names_user_idx on public.baby_names (user_id);
+
+-- 8) Riwayat chat gizi AI (lihat app/dashboard/chat/page.js)
+-- Fotonya sendiri TIDAK disimpan di sini (cuma dikirim ke Gemini lalu
+-- dibuang) — cuma teks + hasil analisisnya, supaya histori chat tetap ada
+-- tanpa menyimpan foto makanan penggunanya. `saved_meal_id` menautkan ke
+-- baris `meals` kalau hasil analisis itu sudah disimpan pengguna ke dashboard
+-- (lewat tombol "Simpan ke Dashboard") — null berarti belum/sudah dibatalkan.
+create table if not exists public.chat_messages (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  role text not null check (role in ('user','assistant')),
+  text text,
+  had_image boolean not null default false,
+  analysis jsonb,
+  saved_meal_id uuid references public.meals(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists chat_messages_user_created_idx on public.chat_messages (user_id, created_at);
+
 -- ================= STORAGE (foto/video/voice note jurnal) =================
 -- Bucket privat — file cuma bisa diakses lewat signed URL yang dibuat oleh
 -- pemiliknya sendiri, bukan URL publik. Path filenya WAJIB berbentuk
@@ -144,6 +179,8 @@ alter table public.vitamins enable row level security;
 alter table public.vitamin_checks enable row level security;
 alter table public.journal_entries enable row level security;
 alter table public.journal_attachments enable row level security;
+alter table public.baby_names enable row level security;
+alter table public.chat_messages enable row level security;
 
 create policy "profiles: owner select" on public.profiles for select using (auth.uid() = user_id);
 create policy "profiles: owner insert" on public.profiles for insert with check (auth.uid() = user_id);
@@ -172,3 +209,13 @@ create policy "journal_entries: owner delete" on public.journal_entries for dele
 create policy "journal_attachments: owner select" on public.journal_attachments for select using (auth.uid() = user_id);
 create policy "journal_attachments: owner insert" on public.journal_attachments for insert with check (auth.uid() = user_id);
 create policy "journal_attachments: owner delete" on public.journal_attachments for delete using (auth.uid() = user_id);
+
+create policy "baby_names: owner select" on public.baby_names for select using (auth.uid() = user_id);
+create policy "baby_names: owner insert" on public.baby_names for insert with check (auth.uid() = user_id);
+create policy "baby_names: owner update" on public.baby_names for update using (auth.uid() = user_id);
+create policy "baby_names: owner delete" on public.baby_names for delete using (auth.uid() = user_id);
+
+create policy "chat_messages: owner select" on public.chat_messages for select using (auth.uid() = user_id);
+create policy "chat_messages: owner insert" on public.chat_messages for insert with check (auth.uid() = user_id);
+create policy "chat_messages: owner update" on public.chat_messages for update using (auth.uid() = user_id);
+create policy "chat_messages: owner delete" on public.chat_messages for delete using (auth.uid() = user_id);

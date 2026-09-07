@@ -283,6 +283,7 @@ export default function JournalPage() {
           <Link href="/dashboard" className="nav-link">Dashboard</Link>
           <Link href="/dashboard/journal" className="nav-link active">Jurnal</Link>
           <Link href="/dashboard/chat" className="nav-link">Chat</Link>
+          <Link href="/dashboard/baby-names" className="nav-link">Nama Bayi</Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
