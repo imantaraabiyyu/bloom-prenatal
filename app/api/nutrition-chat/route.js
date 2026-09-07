@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
-import { nutritionChatTurn } from "@/lib/gemini";
+import { streamNutritionChatTurn } from "@/lib/gemini";
 
 // This app's only backend route: a thin, authenticated proxy in front of the
 // Gemini API for the in-app nutrition chat (app/dashboard/chat/page.js). It
@@ -8,8 +8,17 @@ import { nutritionChatTurn } from "@/lib/gemini";
 // via its own already-authenticated Supabase client (same RLS-backed path as
 // every other write in this app). Existing purely so the Gemini API key
 // never reaches the browser.
+//
+// Streams its response as newline-delimited JSON so the reply can appear
+// progressively instead of all at once after the whole turn finishes:
+//   {"type":"delta","text":"..."}   — zero or more, as Gemini generates the reply
+//   {"type":"done","result":{...}}  — once, the full sanitized turn result
+//   {"type":"error","error":"..."}  — instead of "done", if something failed
+// Auth/validation failures happen before any of that, as a normal JSON
+// response with a real status code — only once streaming has actually
+// started are errors reported this way (HTTP headers are already sent by then).
 export const runtime = "nodejs";
-export const maxDuration = 60; // Gemini's vision call can take a few seconds
+export const maxDuration = 60;
 
 // Client already downsizes photos before sending (see resizeImageForChat in
 // the chat page) — this is just a server-side backstop against a modified
@@ -41,8 +50,6 @@ export async function POST(request) {
     return NextResponse.json({ error: "Foto terlalu besar. Coba foto lain atau perkecil dulu." }, { status: 413 });
   }
 
-  // Defense-in-depth same as MAX_BASE64_LENGTH above — the client only ever
-  // sends its own recent messages, but don't trust that blindly server-side.
   const history = Array.isArray(body?.history)
     ? body.history
         .slice(-MAX_HISTORY_TURNS)
@@ -50,11 +57,25 @@ export async function POST(request) {
         .map((h) => ({ role: h.role, text: String(h.text || "").slice(0, MAX_MESSAGE_LENGTH) }))
     : [];
 
-  try {
-    const result = await nutritionChatTurn({ message, image, history });
-    return NextResponse.json({ result });
-  } catch (e) {
-    console.error("nutrition-chat turn error:", e);
-    return NextResponse.json({ error: "Ada gangguan pas memproses pesannya. Coba lagi sebentar lagi." }, { status: 502 });
-  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      try {
+        const result = await streamNutritionChatTurn({ message, image, history }, (delta) => {
+          send({ type: "delta", text: delta });
+        });
+        send({ type: "done", result });
+      } catch (e) {
+        console.error("nutrition-chat stream error:", e);
+        send({ type: "error", error: "Ada gangguan pas memproses pesannya. Coba lagi sebentar lagi." });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache" },
+  });
 }

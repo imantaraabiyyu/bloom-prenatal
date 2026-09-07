@@ -9,10 +9,6 @@ import {
   parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
   statusForPct, slugifyNutrientLabel, mergeExtraNutrients,
 } from "@/lib/nutrition";
-import {
-  computeHPL, computeGestationalAge, formatGestationalAge, trimesterForWeeks,
-  gestationalProgressPct, formatDateID, FULL_TERM_WEEKS,
-} from "@/lib/pregnancy";
 
 function downloadText(filename, text) {
   const blob = new Blob([text], { type: "text/csv" });
@@ -37,13 +33,6 @@ export default function Dashboard() {
   const [dayIndex, setDayIndex] = useState(0);
   const [extraDates, setExtraDates] = useState([]); // dates jumped-to via the date picker that have no data yet
   const [pendingJumpDate, setPendingJumpDate] = useState(null);
-
-  // HPHT (Hari Pertama Haid Terakhir) — usia kehamilan/HPL/progress semua dihitung darinya
-  const [hpht, setHpht] = useState(null);
-  const [hphtEditing, setHphtEditing] = useState(false);
-  const [hphtDraft, setHphtDraft] = useState("");
-  const [hphtSaving, setHphtSaving] = useState(false);
-  const [hphtError, setHphtError] = useState("");
 
   const [showAll, setShowAll] = useState(false);
   const [mealError, setMealError] = useState("");
@@ -90,7 +79,6 @@ export default function Dashboard() {
         profile = created;
       }
       setTrimester(profile?.trimester || "t2");
-      setHpht(profile?.hpht || null);
 
       // vitamins catalog (seed defaults if empty)
       let { data: vitRows } = await supabase.from("vitamins").select("*").eq("user_id", u.id).order("created_at", { ascending: true });
@@ -150,17 +138,18 @@ export default function Dashboard() {
     setPendingJumpDate(dateStr);
   }
 
+  // today is always present in `dates` (see the useMemo above), so this
+  // never needs the extraDates/pendingJumpDate dance jumpToDate uses.
+  function goToToday() {
+    const idx = dates.indexOf(todayISO());
+    if (idx >= 0) setDayIndex(idx);
+  }
+
   const clampedDayIndex = Math.min(Math.max(dayIndex, 0), Math.max(dates.length - 1, 0));
   const currentDate = dates[clampedDayIndex];
   const targets = TARGETS[trimester];
   const activeNutrients = useMemo(() => computeActiveNutrients(meals), [meals]);
   const mealsByDay = useMemo(() => groupMealsByDay(meals), [meals]);
-
-  // ---------------- pregnancy info (HPHT → usia kehamilan / HPL) ----------------
-  const gestationalAge = useMemo(() => computeGestationalAge(hpht, todayISO()), [hpht]);
-  const hpl = useMemo(() => computeHPL(hpht), [hpht]);
-  const gaProgressPct = gestationalProgressPct(gestationalAge);
-  const suggestedTrimester = gestationalAge ? trimesterForWeeks(gestationalAge.weeks) : null;
 
   function dayTotals(date) {
     const base = mealsByDay[date] || {};
@@ -195,23 +184,6 @@ export default function Dashboard() {
   async function changeTrimester(t) {
     setTrimester(t);
     await supabase.from("profiles").upsert({ user_id: user.id, trimester: t }, { onConflict: "user_id" });
-  }
-
-  function openHphtForm() {
-    setHphtDraft(hpht || "");
-    setHphtError("");
-    setHphtEditing(true);
-  }
-
-  async function saveHpht() {
-    setHphtError("");
-    if (!hphtDraft) { setHphtError("⚠ Pilih tanggal HPHT dulu."); return; }
-    setHphtSaving(true);
-    const { error } = await supabase.from("profiles").upsert({ user_id: user.id, hpht: hphtDraft }, { onConflict: "user_id" });
-    setHphtSaving(false);
-    if (error) { setHphtError("⚠ " + error.message); return; }
-    setHpht(hphtDraft);
-    setHphtEditing(false);
   }
 
   async function handleMealFile(file) {
@@ -453,7 +425,7 @@ export default function Dashboard() {
           <Link href="/dashboard" className="nav-link active">Dashboard</Link>
           <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
           <Link href="/dashboard/chat" className="nav-link">Chat</Link>
-          <Link href="/dashboard/baby-names" className="nav-link">Nama Bayi</Link>
+          <Link href="/dashboard/profile" className="nav-link">Profil</Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -487,56 +459,6 @@ export default function Dashboard() {
       )}
 
       <div className="bloom-grid">
-        {/* Usia kehamilan (dari HPHT) + progress tracker */}
-        <div className="panel full">
-          <h2>Usia kehamilan</h2>
-          {!hpht && !hphtEditing && (
-            <>
-              <p className="format-hint" style={{ marginTop: 0 }}>
-                Isi HPHT (Hari Pertama Haid Terakhir) buat menghitung usia kehamilan, HPL (perkiraan
-                lahir), dan progress-nya otomatis.
-              </p>
-              <button className="manual-form-save" onClick={openHphtForm}>+ Isi HPHT</button>
-            </>
-          )}
-          {hphtEditing && (
-            <div className="hpht-form">
-              <input type="date" value={hphtDraft} onChange={(e) => setHphtDraft(e.target.value)} />
-              {hphtError && <div className="error-box">{hphtError}</div>}
-              <div className="manual-form-actions">
-                <button className="manual-form-save" onClick={saveHpht} disabled={hphtSaving}>
-                  {hphtSaving ? "Menyimpan…" : "Simpan HPHT"}
-                </button>
-                <button className="manual-form-cancel" onClick={() => setHphtEditing(false)}>Batal</button>
-              </div>
-            </div>
-          )}
-          {hpht && !hphtEditing && (
-            <div className="pregnancy-info">
-              <div className="pregnancy-stats">
-                <div className="pregnancy-stat">
-                  <span className="pregnancy-stat-value">{formatGestationalAge(gestationalAge)}</span>
-                  <span className="pregnancy-stat-label">Usia kehamilan</span>
-                </div>
-                <div className="pregnancy-stat">
-                  <span className="pregnancy-stat-value">{formatDateID(hpl)}</span>
-                  <span className="pregnancy-stat-label">HPL (perkiraan lahir)</span>
-                </div>
-              </div>
-              <div className="water-bar-track">
-                <div className="water-bar-fill" style={{ width: `${gaProgressPct}%`, background: "var(--lilac)" }} />
-              </div>
-              <div className="pregnancy-progress-label">
-                <span>Minggu {gestationalAge?.weeks ?? 0} dari {FULL_TERM_WEEKS}</span>
-                {suggestedTrimester && suggestedTrimester !== trimester && (
-                  <span> · kalender menunjukkan Trimester {suggestedTrimester.slice(1)}</span>
-                )}
-              </div>
-              <button className="extra-nutrient-add" style={{ marginTop: 12 }} onClick={openHphtForm}>Ubah HPHT</button>
-            </div>
-          )}
-        </div>
-
         {/* Upload column */}
         <div>
           <div className="panel">
@@ -735,21 +657,29 @@ export default function Dashboard() {
             </>
           )}
           {dates.length > 0 && (
-            <div className="day-nav">
-              <button onClick={() => setDayIndex(Math.max(0, clampedDayIndex - 1))} disabled={clampedDayIndex <= 0}>‹</button>
-              <select className="date-select" value={clampedDayIndex} onChange={(e) => setDayIndex(parseInt(e.target.value, 10))}>
-                {dates.map((d, i) => <option key={d} value={i}>{d}</option>)}
-              </select>
-              <button onClick={() => setDayIndex(Math.min(dates.length - 1, clampedDayIndex + 1))} disabled={clampedDayIndex >= dates.length - 1}>›</button>
+            <div className="date-controls">
+              <div className="divider" />
+              <div className="day-nav-row">
+                <div className="day-nav">
+                  <button onClick={() => setDayIndex(Math.max(0, clampedDayIndex - 1))} disabled={clampedDayIndex <= 0}>‹</button>
+                  <select className="date-select" value={clampedDayIndex} onChange={(e) => setDayIndex(parseInt(e.target.value, 10))}>
+                    {dates.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                  </select>
+                  <button onClick={() => setDayIndex(Math.min(dates.length - 1, clampedDayIndex + 1))} disabled={clampedDayIndex >= dates.length - 1}>›</button>
+                </div>
+                {currentDate !== todayISO() && (
+                  <button type="button" className="today-btn" onClick={goToToday}>Hari ini</button>
+                )}
+              </div>
+              <div className="date-jump">
+                <label htmlFor="date-jump-input">Lompat ke tanggal lain (isi data lama)</label>
+                <input
+                  id="date-jump-input" type="date" value={currentDate || ""}
+                  onChange={(e) => jumpToDate(e.target.value)}
+                />
+              </div>
             </div>
           )}
-          <div className="date-jump">
-            <label htmlFor="date-jump-input">Lompat ke tanggal lain (isi data lama)</label>
-            <input
-              id="date-jump-input" type="date" value={currentDate || ""}
-              onChange={(e) => jumpToDate(e.target.value)}
-            />
-          </div>
         </div>
 
         {/* Vitamin checklist */}

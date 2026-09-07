@@ -60,7 +60,9 @@ selain langkah di bawah.
    Environment Variables (produksi):
    ```
    GEMINI_API_KEY=...               # dari langkah 1
-   GEMINI_MODEL=gemini-2.0-flash    # opsional, ini nilai defaultnya
+   GEMINI_MODEL=gemini-3.6-flash    # opsional, ini nilai defaultnya — Google kadang
+                                    # mem-pensiunkan model lama, ganti nilai ini kalau
+                                    # suatu saat error "model ... no longer available"
    ```
 3. Kalau belum, jalankan ulang `supabase/schema.sql` (lihat langkah 2 di atas)
    — aman dijalankan ulang, tidak menghapus data yang sudah ada.
@@ -113,10 +115,13 @@ app/
   dashboard/journal/page.js → jurnal harian (catatan + mood + foto/video/voice note)
   dashboard/chat/page.js  → chat gizi AI (kirim foto makanan, dapat analisis + insight,
                              riwayat chat tersimpan, "Simpan ke Dashboard" per hasil analisis)
-  dashboard/baby-names/page.js → daftar calon nama bayi (favorit, gender, catatan/arti)
+  dashboard/profile/page.js → profil kehamilan: usia kehamilan/HPL dari HPHT, dan daftar
+                               calon nama bayi (favorit, gender, catatan/arti)
   api/nutrition-chat/route.js → satu-satunya route backend: proxy terautentikasi ke
-                                 Gemini API buat analisis foto (tidak menyentuh database —
-                                 client yang menyimpan hasilnya ke `meals` sendiri)
+                                 Gemini API, dialirkan sebagai newline-delimited JSON
+                                 (balasan Bloom muncul progresif, bukan sekaligus di akhir) —
+                                 tidak menyentuh database, client yang menyimpan hasilnya
+                                 ke `meals` sendiri
   globals.css             → tema visual (dark plum)
 lib/
   supabaseClient.js      → koneksi ke Supabase dari browser (anon key)
@@ -125,7 +130,8 @@ lib/
   nutrition.js           → target gizi per trimester, parser CSV, dll
   pregnancy.js           → usia kehamilan/HPL dari HPHT (Naegele's rule), dihitung bukan disimpan
   journal.js             → daftar mood + konstanta lampiran jurnal (limit ukuran/jumlah file)
-  gemini.js              → pemanggil Gemini API untuk analisis gizi dari foto makanan
+  gemini.js              → panggilan streaming ke Gemini API + parser JSON parsial
+                            (buat menampilkan balasan sambil masih ditulis modelnya)
 supabase/
   schema.sql              → skema tabel + storage bucket + Row Level Security
 ```
@@ -168,13 +174,19 @@ supabase/
   hasil analisisnya saja, bukan fotonya. Tier gratis Gemini punya batas rate
   limit harian; untuk pemakaian pribadi/keluarga biasanya jauh dari batas
   tersebut.
-- Usia kehamilan dihitung dari HPHT (Hari Pertama Haid Terakhir) yang diisi di
-  panel "Usia kehamilan" pada dashboard — HPL (perkiraan lahir) dan progress
-  ke minggu ke-40 otomatis ikut terhitung (aturan Naegele: HPHT + 280 hari).
-  Cuma perkiraan kalender, bukan pengganti perhitungan USG dokter.
+- Usia kehamilan dihitung dari HPHT (Hari Pertama Haid Terakhir — tanggal
+  mulai menstruasi terakhir sebelum hamil) yang diisi di tab **Profil**. Kalau
+  yang kamu punya cuma HPL (perkiraan lahir dari dokter/USG), pakai toggle
+  "Saya tahu HPL" — Bloom membalikkannya jadi HPHT otomatis (aturan Naegele:
+  HPL = HPHT + 280 hari), keduanya saling bisa dihitung dari yang lain. Setiap
+  kali tanggal ini disimpan, `profiles.trimester` ikut disetel otomatis sesuai
+  usia kehamilan saat itu — tapi tetap bisa di-override manual lewat trimester
+  picker di Dashboard kalau perkiraan dokter berbeda. Cuma perkiraan kalender,
+  bukan pengganti perhitungan USG dokter.
 - Panel utama dashboard punya "Lompat ke tanggal lain" di samping navigasi
   hari — jadi kamu bisa mengisi data untuk tanggal apa pun di masa lalu
   (backdate), bukan cuma tanggal yang sudah ada datanya.
-- Daftar calon nama bayi (`baby_names`) murni untuk brainstorming pribadi —
-  belum ada fitur berbagi/kolaborasi lintas akun (mis. dengan pasangan), jadi
-  kalau berdua-duaan mencatat, sepakati dulu satu akun yang dipakai.
+- Daftar calon nama bayi (`baby_names`, di tab **Profil**) murni untuk
+  brainstorming pribadi — belum ada fitur berbagi/kolaborasi lintas akun (mis.
+  dengan pasangan), jadi kalau berdua-duaan mencatat, sepakati dulu satu akun
+  yang dipakai.
