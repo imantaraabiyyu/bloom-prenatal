@@ -264,7 +264,7 @@ export default function ChatPage() {
   if (loading) return <div className="center-loading">Memuat data…</div>;
 
   return (
-    <div className="wrap">
+    <div className="wrap chat-page">
       <div className="topbar">
         <div className="topbar-left">
           <div className="avatar">{(user?.email || "?").charAt(0).toUpperCase()}</div>
