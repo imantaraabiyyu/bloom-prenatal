@@ -6,7 +6,7 @@ import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import { todayISO } from "@/lib/nutrition";
 import {
-  computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForWeeks,
+  computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
   gestationalProgressPct, formatDateID, FULL_TERM_WEEKS,
 } from "@/lib/pregnancy";
 
@@ -32,7 +32,6 @@ export default function ProfilePage() {
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [trimester, setTrimester] = useState("t2");
 
   // HPHT (Hari Pertama Haid Terakhir) — usia kehamilan/HPL/progress semua dihitung darinya.
   // Bisa diisi langsung, atau lewat HPL (perkiraan lahir dari dokter/USG) yang
@@ -64,10 +63,9 @@ export default function ProfilePage() {
 
       let { data: profile } = await supabase.from("profiles").select("*").eq("user_id", u.id).maybeSingle();
       if (!profile) {
-        const { data: created } = await supabase.from("profiles").insert({ user_id: u.id, trimester: "t2" }).select().maybeSingle();
+        const { data: created } = await supabase.from("profiles").insert({ user_id: u.id }).select().maybeSingle();
         profile = created;
       }
-      setTrimester(profile?.trimester || "t2");
       setHpht(profile?.hpht || null);
 
       const { data: nameRows } = await supabase
@@ -91,7 +89,10 @@ export default function ProfilePage() {
   const gestationalAge = useMemo(() => computeGestationalAge(hpht, todayISO()), [hpht]);
   const hpl = useMemo(() => computeHPL(hpht), [hpht]);
   const gaProgressPct = gestationalProgressPct(gestationalAge);
-  const suggestedTrimester = gestationalAge ? trimesterForWeeks(gestationalAge.weeks) : null;
+  // Same derivation the Dashboard uses (for "today" specifically here) — see
+  // trimesterForDate in lib/pregnancy.js. Nothing to store: this is always
+  // freshly computed from hpht, never a saved preference.
+  const trimester = trimesterForDate(hpht, todayISO());
 
   function openHphtForm() {
     setHphtInputMode("hpht");
@@ -117,23 +118,15 @@ export default function ProfilePage() {
       return;
     }
     const hphtToSave = hphtInputMode === "hpl" ? computeHPHTFromHPL(hphtDraft) : hphtDraft;
-    const ga = computeGestationalAge(hphtToSave, todayISO());
-    if (!ga) {
+    if (!computeGestationalAge(hphtToSave, todayISO())) {
       setHphtError("⚠ Tanggal ini menghasilkan usia kehamilan yang tidak valid (di masa depan). Cek lagi tanggalnya.");
       return;
     }
-    // Trimester syncs with the pregnancy tracker every time this is saved —
-    // still manually overridable afterward from the trimester picker on
-    // Dashboard, this just resets it to match whenever the date changes.
-    const newTrimester = trimesterForWeeks(ga.weeks);
     setHphtSaving(true);
-    const { error } = await supabase
-      .from("profiles")
-      .upsert({ user_id: user.id, hpht: hphtToSave, trimester: newTrimester }, { onConflict: "user_id" });
+    const { error } = await supabase.from("profiles").upsert({ user_id: user.id, hpht: hphtToSave }, { onConflict: "user_id" });
     setHphtSaving(false);
     if (error) { setHphtError("⚠ " + error.message); return; }
     setHpht(hphtToSave);
-    setTrimester(newTrimester);
     setHphtEditing(false);
   }
 
@@ -257,7 +250,7 @@ export default function ProfilePage() {
                 </div>
                 <div className="pregnancy-stat">
                   <span className="pregnancy-stat-value">Trimester {trimester.slice(1)}</span>
-                  <span className="pregnancy-stat-label">Tersinkron otomatis</span>
+                  <span className="pregnancy-stat-label">Dihitung otomatis</span>
                 </div>
               </div>
               <div className="water-bar-track">
@@ -265,9 +258,6 @@ export default function ProfilePage() {
               </div>
               <div className="pregnancy-progress-label">
                 <span>Minggu {gestationalAge?.weeks ?? 0} dari {FULL_TERM_WEEKS}</span>
-                {suggestedTrimester && suggestedTrimester !== trimester && (
-                  <span> · kalender menunjukkan Trimester {suggestedTrimester.slice(1)} (beda dari trimester yang dipilih manual di Dashboard)</span>
-                )}
               </div>
               <button className="extra-nutrient-add" style={{ marginTop: 12 }} onClick={openHphtForm}>Ubah HPHT/HPL</button>
             </div>

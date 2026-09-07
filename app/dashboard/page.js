@@ -4,12 +4,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
+import MiniCalendar from "@/components/MiniCalendar";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
   parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
   statusForPct, slugifyNutrientLabel, mergeExtraNutrients,
 } from "@/lib/nutrition";
+import { trimesterForDate } from "@/lib/pregnancy";
 
 function downloadText(filename, text) {
   const blob = new Blob([text], { type: "text/csv" });
@@ -27,13 +29,16 @@ export default function Dashboard() {
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [trimester, setTrimester] = useState("t2");
+  // Trimester is no longer a manual choice — it's derived from HPHT (set in
+  // Profil) + whichever date is being viewed, see the `trimester` const below.
+  const [hpht, setHpht] = useState(null);
   const [meals, setMeals] = useState([]);
   const [vitamins, setVitamins] = useState([]);
   const [vitaminChecks, setVitaminChecks] = useState({}); // { date: { vitaminId: true } }
   const [dayIndex, setDayIndex] = useState(0);
   const [extraDates, setExtraDates] = useState([]); // dates jumped-to via the date picker that have no data yet
   const [pendingJumpDate, setPendingJumpDate] = useState(null);
+  const [calendarMonth, setCalendarMonth] = useState(todayISO().slice(0, 7)); // "YYYY-MM" — which month the calendar shows
 
   const [showAll, setShowAll] = useState(false);
   const [mealError, setMealError] = useState("");
@@ -76,10 +81,10 @@ export default function Dashboard() {
       // profile / trimester
       let { data: profile } = await supabase.from("profiles").select("*").eq("user_id", u.id).maybeSingle();
       if (!profile) {
-        const { data: created } = await supabase.from("profiles").insert({ user_id: u.id, trimester: "t2" }).select().maybeSingle();
+        const { data: created } = await supabase.from("profiles").insert({ user_id: u.id }).select().maybeSingle();
         profile = created;
       }
-      setTrimester(profile?.trimester || "t2");
+      setHpht(profile?.hpht || null);
 
       // vitamins catalog (seed defaults if empty)
       let { data: vitRows } = await supabase.from("vitamins").select("*").eq("user_id", u.id).order("created_at", { ascending: true });
@@ -133,6 +138,21 @@ export default function Dashboard() {
     if (idx >= 0) { setDayIndex(idx); setPendingJumpDate(null); }
   }, [dates, pendingJumpDate]);
 
+  // Default view is today, not the oldest day in history: `dates` is sorted
+  // ascending, so `dayIndex`'s initial 0 only happened to land on today for
+  // an account with no history yet — as soon as there's a single day of
+  // meals/checks before today, index 0 becomes the oldest entry instead.
+  // Runs once after real data loads (dates is just [todayISO()] before
+  // that, so there's nothing to correct yet), never again afterward so it
+  // doesn't fight the day-nav/"Hari ini"/date-jump the user does later.
+  const initialDaySetRef = useRef(false);
+  useEffect(() => {
+    if (loading || initialDaySetRef.current) return;
+    initialDaySetRef.current = true;
+    const idx = dates.indexOf(todayISO());
+    if (idx >= 0) setDayIndex(idx);
+  }, [loading, dates]);
+
   function jumpToDate(dateStr) {
     if (!dateStr) return;
     setExtraDates((prev) => (prev.includes(dateStr) ? prev : [...prev, dateStr]));
@@ -148,6 +168,29 @@ export default function Dashboard() {
 
   const clampedDayIndex = Math.min(Math.max(dayIndex, 0), Math.max(dates.length - 1, 0));
   const currentDate = dates[clampedDayIndex];
+
+  // Days actually worth marking green on the calendar — unlike `dates`
+  // above, this excludes `extraDates` (those are just navigation targets
+  // you jumped to, not real entries) and doesn't force today in either.
+  const datesWithData = useMemo(() => {
+    const set = new Set();
+    meals.forEach((r) => set.add(r.date));
+    Object.keys(vitaminChecks).forEach((d) => set.add(d));
+    return set;
+  }, [meals, vitaminChecks]);
+
+  // Keeps the calendar showing the month of whatever day is currently
+  // selected — e.g. after "Hari ini" or picking a date in a different month.
+  useEffect(() => {
+    if (currentDate) setCalendarMonth(currentDate.slice(0, 7));
+  }, [currentDate]);
+
+  // Derived, not stored: which trimester the currently-viewed day falls in,
+  // based on HPHT (set in Profil). Browsing to a past date via the calendar
+  // shows what trimester you were in *then* — not always "now" — and the
+  // nutrient targets below follow along automatically. Falls back to
+  // Trimester 1 until HPHT/HPL is set (see the info note near the pills).
+  const trimester = trimesterForDate(hpht, currentDate || todayISO());
   const targets = TARGETS[trimester];
   const activeNutrients = useMemo(() => computeActiveNutrients(meals), [meals]);
   const mealsByDay = useMemo(() => groupMealsByDay(meals), [meals]);
@@ -182,11 +225,6 @@ export default function Dashboard() {
   const waterStatus = statusForPct(waterPct);
 
   // ---------------- actions ----------------
-  async function changeTrimester(t) {
-    setTrimester(t);
-    await supabase.from("profiles").upsert({ user_id: user.id, trimester: t }, { onConflict: "user_id" });
-  }
-
   async function handleMealFile(file) {
     if (!file) return;
     setMealError("");
@@ -438,13 +476,22 @@ export default function Dashboard() {
           Catat menu makan dan vitamin harianmu, lalu lihat apakah kebutuhan gizi hari ini sudah
           tercukupi — datanya tersinkron lewat akunmu di semua perangkat.
         </p>
+        {/* Read-only now — trimester follows HPHT (set in Profil) + whichever
+            date you're viewing, not a manual choice. */}
         <div className="trimester-row">
           {[["t1", "Trimester 1"], ["t2", "Trimester 2"], ["t3", "Trimester 3"]].map(([key, label]) => (
-            <button key={key} className={`trimester-btn ${trimester === key ? "active" : ""}`} onClick={() => changeTrimester(key)}>
+            <span key={key} className={`trimester-btn readonly ${trimester === key ? "active" : ""}`}>
               {label}
-            </button>
+            </span>
           ))}
         </div>
+        {!hpht && (
+          <p className="format-hint trimester-hint">
+            ⚠ HPL/HPHT belum diset, jadi trimester ditampilkan sebagai Trimester 1 sementara.
+            Atur di <Link href="/dashboard/profile">tab Profil</Link> supaya trimester dan target
+            gizi ikut usia kehamilanmu yang sebenarnya.
+          </p>
+        )}
       </div>
 
       {activeNutrients.length > 0 && (
@@ -657,30 +704,24 @@ export default function Dashboard() {
               </div>
             </>
           )}
-          {dates.length > 0 && (
-            <div className="date-controls">
-              <div className="divider" />
-              <div className="day-nav-row">
-                <div className="day-nav">
-                  <button onClick={() => setDayIndex(Math.max(0, clampedDayIndex - 1))} disabled={clampedDayIndex <= 0}>‹</button>
-                  <select className="date-select" value={clampedDayIndex} onChange={(e) => setDayIndex(parseInt(e.target.value, 10))}>
-                    {dates.map((d, i) => <option key={d} value={i}>{d}</option>)}
-                  </select>
-                  <button onClick={() => setDayIndex(Math.min(dates.length - 1, clampedDayIndex + 1))} disabled={clampedDayIndex >= dates.length - 1}>›</button>
-                </div>
-                {currentDate !== todayISO() && (
-                  <button type="button" className="today-btn" onClick={goToToday}>Hari ini</button>
-                )}
-              </div>
-              <div className="date-jump">
-                <label htmlFor="date-jump-input">Lompat ke tanggal lain (isi data lama)</label>
-                <input
-                  id="date-jump-input" type="date" value={currentDate || ""}
-                  onChange={(e) => jumpToDate(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
+          <div className="date-controls">
+            <div className="divider" />
+            <button
+              type="button"
+              className={`today-btn ${currentDate === todayISO() ? "active" : ""}`}
+              onClick={goToToday}
+            >
+              Hari ini
+            </button>
+            <MiniCalendar
+              month={calendarMonth}
+              onMonthChange={setCalendarMonth}
+              selectedDate={currentDate}
+              markedDates={datesWithData}
+              todayDate={todayISO()}
+              onSelectDate={jumpToDate}
+            />
+          </div>
         </div>
 
         {/* Vitamin checklist */}
