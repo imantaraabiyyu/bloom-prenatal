@@ -289,6 +289,9 @@ button, input { font-family: inherit; }
 .entry-attachment-broken { width: 120px; height: 60px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11px; color: var(--text-faint); background: rgba(243,237,233,0.05); border-radius: 10px; padding: 6px; }
 .entry-attachment-remove { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(28,18,25,0.9); color: var(--text); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .entry-attachment-remove:hover { background: var(--rose); color: #2B1B2E; }
+/* click-again-to-confirm state (this button has no room for the usual
+   inline "[Ya, hapus] [Batal]" swap — see ConfirmButton's comment) */
+.entry-attachment-remove.confirming { background: var(--rose); color: #2B1B2E; }
 
 /* ---------- In-app nutrition chat ---------- */
 .chat-thread { display: flex; flex-direction: column; gap: 14px; max-height: 60vh; overflow-y: auto; padding: 4px 2px; margin-bottom: 16px; }
@@ -328,6 +331,20 @@ button, input { font-family: inherit; }
 /* keep the attach buttons compact here — the generic .attach-btn mobile rule
    below would otherwise stretch them to fill the row alongside the textarea */
 .chat-input-row .attach-btn { flex: 0 0 auto; }
+
+/* ---------- Delete confirmation (ConfirmButton) ---------- */
+/* margin-left:auto so it still lands at the end of a row like
+   .journal-entry-remove's own margin-left:auto did — harmless where a
+   flex:1 sibling already pushes it there (.meal-list-remove etc.), since
+   that sibling has already claimed the free space by the time this applies. */
+.confirm-inline { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
+.confirm-inline-note { font-size: 11px; color: var(--text-dimmer); }
+/* extra class of specificity beats context-scoped rules like
+   .chat-bubble-actions button, which would otherwise win by source order */
+.confirm-inline .confirm-inline-yes { background: var(--rose); color: #2B1B2E; border: none; text-decoration: none; font-size: 11.5px; padding: 5px 10px; border-radius: 100px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.confirm-inline .confirm-inline-yes:hover { filter: brightness(1.1); }
+.confirm-inline .confirm-inline-cancel { background: rgba(243,237,233,0.08); border: none; color: var(--text-dim); text-decoration: none; font-size: 11.5px; padding: 5px 9px; border-radius: 100px; cursor: pointer; white-space: nowrap; }
+.confirm-inline .confirm-inline-cancel:hover { background: rgba(243,237,233,0.14); }
 
 .disclaimer { max-width: 920px; margin: 26px auto 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
 .center-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; font-size: 13px; }

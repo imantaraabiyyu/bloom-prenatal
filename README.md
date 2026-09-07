@@ -123,6 +123,9 @@ app/
                                  tidak menyentuh database, client yang menyimpan hasilnya
                                  ke `meals` sendiri
   globals.css             → tema visual (dark plum)
+components/
+  ConfirmButton.js       → tombol hapus dengan konfirmasi inline "[Ya, hapus] [Batal]"
+                            (dipakai semua tombol ✕ hapus di seluruh app, ganti native confirm())
 lib/
   supabaseClient.js      → koneksi ke Supabase dari browser (anon key)
   supabaseServer.js      → koneksi ke Supabase dari server, baca sesi login dari cookie

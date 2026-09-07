@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import ConfirmButton from "@/components/ConfirmButton";
 import { todayISO } from "@/lib/nutrition";
 import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForWeeks,
@@ -338,7 +339,7 @@ export default function ProfilePage() {
                     </div>
                     {n.note && <div className="babyname-note">{n.note}</div>}
                   </div>
-                  <button className="babyname-remove" title="Hapus nama ini" onClick={() => handleDelete(n.id)}>✕</button>
+                  <ConfirmButton className="babyname-remove" title="Hapus nama ini" onConfirm={() => handleDelete(n.id)}>✕</ConfirmButton>
                 </div>
               );
             })
