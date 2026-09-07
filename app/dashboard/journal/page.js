@@ -282,6 +282,7 @@ export default function JournalPage() {
         <div className="topbar-nav">
           <Link href="/dashboard" className="nav-link">Dashboard</Link>
           <Link href="/dashboard/journal" className="nav-link active">Jurnal</Link>
+          <Link href="/dashboard/chat" className="nav-link">Chat</Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>

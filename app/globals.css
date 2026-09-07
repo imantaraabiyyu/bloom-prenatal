@@ -107,6 +107,23 @@ button, input { font-family: inherit; }
 .manual-form-cancel { padding: 11px 16px; border-radius: 10px; border: none; background: rgba(243,237,233,0.08); color: var(--text-dim); font-size: 13px; cursor: pointer; }
 .manual-form-cancel:hover { background: rgba(243,237,233,0.14); }
 
+/* ---------- Custom ("nutrisi lain") nutrient rows on the vitamin form ---------- */
+.extra-nutrient-section { display: flex; flex-direction: column; gap: 8px; }
+.extra-nutrient-label { font-size: 11.5px; color: var(--text-dimmer); line-height: 1.5; }
+.extra-nutrient-list { display: flex; flex-direction: column; gap: 8px; }
+.extra-nutrient-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.extra-nutrient-row input[type="text"] { flex: 1 1 120px; min-width: 100px; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(243,237,233,0.18); background: rgba(0,0,0,0.2); color: var(--text); font-size: 13px; }
+.extra-nutrient-row input[type="number"] { width: 90px; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(243,237,233,0.18); background: rgba(0,0,0,0.2); color: var(--text); font-size: 13px; }
+.extra-nutrient-row input:focus { outline: none; border-color: var(--accent); }
+.extra-nutrient-row button { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; padding: 4px 6px; border-radius: 6px; flex-shrink: 0; }
+.extra-nutrient-row button:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
+.extra-nutrient-add { align-self: flex-start; background: none; border: 1.5px dashed rgba(243,237,233,0.28); color: var(--lilac); font-size: 12.5px; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+.extra-nutrient-add:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Nutrisi lain — day summary chips ---------- */
+.extra-today-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.extra-today-chip { font-size: 12.5px; padding: 6px 12px; border-radius: 100px; background: rgba(243,237,233,0.06); border: 1px solid rgba(243,237,233,0.1); color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; }
+
 /* ---------- Water quick-log ---------- */
 .water-widget-label { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13.5px; flex-wrap: wrap; }
 .water-widget-value { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-dimmer); }
@@ -129,6 +146,7 @@ button, input { font-family: inherit; }
 .meal-list-item:last-child { border-bottom: none; }
 .meal-list-info { flex: 1; min-width: 0; }
 .meal-list-name { font-size: 13.5px; font-weight: 600; color: #e8dde5; }
+.meal-source-badge { margin-left: 6px; font-size: 12px; opacity: .8; }
 .meal-list-detail { font-size: 11px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; margin-top: 3px; }
 .meal-list-remove { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; padding: 4px 6px; border-radius: 6px; flex-shrink: 0; }
 .meal-list-remove:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
@@ -235,6 +253,31 @@ button, input { font-family: inherit; }
 .entry-attachment-remove { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(28,18,25,0.9); color: var(--text); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .entry-attachment-remove:hover { background: var(--rose); color: #2B1B2E; }
 
+/* ---------- In-app nutrition chat ---------- */
+.chat-thread { display: flex; flex-direction: column; gap: 14px; max-height: 60vh; overflow-y: auto; padding: 4px 2px; margin-bottom: 16px; }
+.chat-empty { font-size: 12.5px; color: var(--text-dimmer); padding: 8px 0; }
+.chat-msg-row { display: flex; }
+.chat-msg-row.user { justify-content: flex-end; }
+.chat-msg-row.assistant { justify-content: flex-start; }
+.chat-bubble { max-width: 78%; border-radius: 16px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+.chat-msg-row.user .chat-bubble { background: var(--accent); color: #2B1B2E; border-bottom-right-radius: 4px; }
+.chat-msg-row.assistant .chat-bubble { background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); border-bottom-left-radius: 4px; }
+.chat-bubble-image { display: block; max-width: 200px; border-radius: 12px; margin-bottom: 8px; }
+.chat-bubble-actions { margin-top: 8px; display: flex; gap: 10px; align-items: center; }
+.chat-bubble-actions button { background: none; border: none; color: var(--rose); font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
+.chat-saved-tag { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--sage); }
+.chat-typing { font-style: italic; color: var(--text-dimmer); }
+.chat-input-area { display: flex; flex-direction: column; gap: 10px; }
+.chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.chat-input-row textarea { flex: 1; resize: none; min-height: 44px; max-height: 120px; padding: 11px 12px; border-radius: 12px; border: 1px solid rgba(243,237,233,0.18); background: rgba(0,0,0,0.2); color: var(--text); font-size: 14px; font-family: inherit; line-height: 1.4; }
+.chat-input-row textarea:focus { outline: none; border-color: var(--accent); }
+.chat-send-btn { padding: 12px 18px; border-radius: 10px; border: none; background: var(--accent); color: #2B1B2E; font-weight: 600; font-size: 13.5px; cursor: pointer; flex-shrink: 0; }
+.chat-send-btn:disabled { opacity: .5; cursor: default; }
+.chat-send-btn:hover:not(:disabled) { filter: brightness(1.05); }
+/* keep the attach button compact here — the generic .attach-btn mobile rule
+   below would otherwise stretch it to fill the row alongside the textarea */
+.chat-input-row .attach-btn { flex: 0 0 auto; }
+
 .disclaimer { max-width: 920px; margin: 26px auto 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
 .center-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
 
@@ -255,10 +298,14 @@ button, input { font-family: inherit; }
   .manual-form-actions { flex-direction: column; }
   .manual-form-actions button { width: 100%; }
 
+  .extra-nutrient-row input[type="text"], .extra-nutrient-row input[type="number"] { min-width: 100%; }
+
   .summary-row { grid-template-columns: repeat(2, 1fr); }
 
   .attach-btn { flex: 1 1 auto; justify-content: center; }
   .pending-item, .pending-item img, .pending-item video { width: 78px; height: 78px; }
   .entry-attachment img, .entry-attachment video { width: 96px; height: 96px; }
   .entry-attachment-broken { width: 96px; }
+
+  .chat-bubble { max-width: 88%; }
 }
