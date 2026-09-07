@@ -174,11 +174,15 @@ supabase/
   upload video.
 - Transkrip voice note (opsional, butuh `GEMINI_API_KEY`, lihat bagian 5)
   cuma tersedia saat menulis catatan baru — buka di voice note yang baru
-  direkam, sebelum catatannya disimpan (belum ada fitur edit catatan yang
-  sudah tersimpan, jadi belum ada tempat untuk menempelkan hasil transkrip
-  voice note lama). Rekamannya sendiri (bukan cuma transkripnya) dikirim ke
-  Gemini untuk dianalisis — beda dari foto di Chat, rekaman voice note
-  memang sudah tersimpan di Storage terlepas dari fitur ini.
+  direkam, sebelum catatannya disimpan. Belum ada tombol transkrip untuk
+  voice note lama yang sudah tersimpan (termasuk lewat "✏️ Ubah" di bawah —
+  form edit cuma untuk tanggal/mood/teks catatan, lampiran tidak diutak-atik
+  di sana). Rekamannya sendiri (bukan cuma transkripnya) dikirim ke Gemini
+  untuk dianalisis — beda dari foto di Chat, rekaman voice note memang sudah
+  tersimpan di Storage terlepas dari fitur ini.
+- Catatan yang sudah tersimpan bisa diubah lewat "✏️" di riwayat (tanggal,
+  mood, teks catatan) — lampiran (foto/video/voice note) tetap cuma bisa
+  dihapus, belum ada fitur menambah lampiran baru ke catatan yang sudah ada.
 - Chat gizi AI (opsional, lihat bagian 5 di atas) adalah obrolan bebas — bisa
   dipakai untuk ngobrol/tanya-tanya biasa, dan Gemini sendiri yang menentukan
   kapan suatu pesan (teks dan/atau foto) itu cerita soal makanan/minuman yang

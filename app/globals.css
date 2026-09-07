@@ -278,9 +278,16 @@ button, input { font-family: inherit; }
 .journal-entry-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .journal-entry-date { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--text-dimmer); }
 .journal-entry-mood { font-size: 12px; color: var(--lilac); }
-.journal-entry-remove { margin-left: auto; background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
+/* wraps edit+delete so they land together at the row's end — moved the
+   margin-left:auto here (off .journal-entry-remove) so the two buttons sit
+   next to each other instead of delete alone drifting to the far right */
+.journal-entry-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.journal-entry-edit { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+.journal-entry-edit:hover { color: var(--accent); background: rgba(227,182,94,0.12); }
+.journal-entry-remove { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
 .journal-entry-remove:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
 .journal-entry-note { margin: 0; font-size: 13.5px; color: #e8dde5; line-height: 1.6; white-space: pre-wrap; }
+.journal-edit-form { display: flex; flex-direction: column; gap: 12px; margin: 4px 0 10px; }
 
 /* ---------- Journal attachments (photo/video/voice note) ---------- */
 .attach-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
@@ -386,10 +393,11 @@ button, input { font-family: inherit; }
 .attach-menu-item input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
 /* ---------- Delete confirmation (ConfirmButton) ---------- */
-/* margin-left:auto so it still lands at the end of a row like
-   .journal-entry-remove's own margin-left:auto did — harmless where a
-   flex:1 sibling already pushes it there (.meal-list-remove etc.), since
-   that sibling has already claimed the free space by the time this applies. */
+/* margin-left:auto so it still lands at the end of a row on its own —
+   harmless where a flex:1 sibling already pushes it there (.meal-list-remove
+   etc.) or where a wrapper already carries its own margin-left:auto
+   (.journal-entry-actions), since that space has already been claimed by
+   the time this applies and there's nothing left for it to expand into. */
 .confirm-inline { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .confirm-inline-note { font-size: 11px; color: var(--text-dimmer); }
 /* extra class of specificity beats context-scoped rules like
@@ -425,6 +433,13 @@ button, input { font-family: inherit; }
 
   .attach-btn { flex: 1 1 auto; justify-content: center; }
   .pending-item, .pending-item img, .pending-item video { width: 78px; height: 78px; }
+  /* the rule above clamps every .pending-item to a fixed 78px square, meant
+     for photo/video thumbnails — the voice-note card's actual content
+     (transcribe prompt, streaming preview, tidied draft) is much taller and
+     was silently overflowing past that fixed box, overlapping whatever
+     rendered after it (down to the Simpan catatan button). Give it its
+     height back. */
+  .pending-item.pending-voice { width: auto; height: auto; max-width: 100%; }
   .entry-attachment img, .entry-attachment video { width: 96px; height: 96px; }
   .entry-attachment-broken { width: 96px; }
 

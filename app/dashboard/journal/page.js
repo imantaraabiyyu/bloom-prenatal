@@ -42,6 +42,15 @@ export default function JournalPage() {
   const [entries, setEntries] = useState([]);
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState(null); // click-again-to-confirm delete
 
+  // editing an existing entry — date/mood/note only; attachments keep their
+  // own add-at-creation-time/delete-only management, not touched here
+  const [editingEntryId, setEditingEntryId] = useState(null);
+  const [editDate, setEditDate] = useState("");
+  const [editMood, setEditMood] = useState(null);
+  const [editNote, setEditNote] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+
   const [entryDate, setEntryDate] = useState(todayISO());
   const [mood, setMood] = useState(null);
   const [note, setNote] = useState("");
@@ -350,6 +359,46 @@ export default function JournalPage() {
     await supabase.from("journal_entries").delete().eq("id", entry.id);
   }
 
+  // ---------------- edit an existing entry ----------------
+  function startEditEntry(entry) {
+    setEditingEntryId(entry.id);
+    setEditDate(entry.entry_date);
+    setEditMood(entry.mood);
+    setEditNote(entry.note || "");
+    setEditError("");
+  }
+
+  function cancelEditEntry() {
+    setEditingEntryId(null);
+    setEditError("");
+  }
+
+  async function saveEditEntry(entry) {
+    setEditError("");
+    const trimmed = editNote.trim();
+    const hasAttachments = (entry.attachments || []).length > 0;
+    if (!trimmed && !hasAttachments) { setEditError("⚠ Tulis catatan dulu."); return; }
+    if (!editDate) { setEditError("⚠ Pilih tanggal untuk catatan ini."); return; }
+
+    setEditSaving(true);
+    const { data, error: updateErr } = await supabase
+      .from("journal_entries")
+      .update({ entry_date: editDate, mood: editMood, note: trimmed, updated_at: new Date().toISOString() })
+      .eq("id", entry.id)
+      .select()
+      .maybeSingle();
+    setEditSaving(false);
+    if (updateErr) { setEditError("⚠ " + updateErr.message); return; }
+
+    // Merge into the existing entry rather than replacing it outright — the
+    // update+select above only returns journal_entries columns, not the
+    // attachments array this list item also carries.
+    setEntries((prev) => prev
+      .map((e) => (e.id === entry.id ? { ...e, entry_date: data.entry_date, mood: data.mood, note: data.note } : e))
+      .sort(sortEntries));
+    setEditingEntryId(null);
+  }
+
   async function handleDeleteAttachment(entryId, attachment) {
     setEntries((prev) => prev.map((e) => (
       e.id === entryId ? { ...e, attachments: e.attachments.filter((a) => a.id !== attachment.id) } : e
@@ -571,9 +620,48 @@ export default function JournalPage() {
                   <div className="journal-entry-header">
                     <span className="journal-entry-date">{e.entry_date}</span>
                     {m && <span className="journal-entry-mood">{m.emoji} {m.label}</span>}
-                    <ConfirmButton className="journal-entry-remove" title="Hapus catatan ini" onConfirm={() => handleDelete(e)}>✕</ConfirmButton>
+                    <div className="journal-entry-actions">
+                      {editingEntryId !== e.id && (
+                        <button type="button" className="journal-entry-edit" title="Ubah catatan ini" onClick={() => startEditEntry(e)}>✏️</button>
+                      )}
+                      <ConfirmButton className="journal-entry-remove" title="Hapus catatan ini" onConfirm={() => handleDelete(e)}>✕</ConfirmButton>
+                    </div>
                   </div>
-                  {e.note && <p className="journal-entry-note">{e.note}</p>}
+
+                  {editingEntryId === e.id ? (
+                    <div className="journal-edit-form">
+                      <div className="journal-date-row">
+                        <label htmlFor={`edit-date-${e.id}`}>Tanggal</label>
+                        <input
+                          id={`edit-date-${e.id}`} type="date" className="journal-date-input"
+                          value={editDate} onChange={(ev) => setEditDate(ev.target.value)}
+                        />
+                      </div>
+                      <div className="mood-picker">
+                        {MOODS.map((mm) => (
+                          <button
+                            key={mm.key} type="button" className={`mood-btn ${editMood === mm.key ? "active" : ""}`}
+                            onClick={() => setEditMood((prev) => (prev === mm.key ? null : mm.key))} title={mm.label}
+                          >
+                            <span>{mm.emoji}</span> {mm.label}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        className="journal-textarea" rows={4}
+                        value={editNote} onChange={(ev) => setEditNote(ev.target.value)}
+                      />
+                      {editError && <div className="error-box">{editError}</div>}
+                      <div className="manual-form-actions">
+                        <button className="manual-form-save" onClick={() => saveEditEntry(e)} disabled={editSaving}>
+                          {editSaving ? "Menyimpan…" : "Simpan perubahan"}
+                        </button>
+                        <button className="manual-form-cancel" onClick={cancelEditEntry}>Batal</button>
+                      </div>
+                    </div>
+                  ) : (
+                    e.note && <p className="journal-entry-note">{e.note}</p>
+                  )}
                   {e.attachments && e.attachments.length > 0 && (
                     <div className="entry-attachments">
                       {e.attachments.map((a) => (
