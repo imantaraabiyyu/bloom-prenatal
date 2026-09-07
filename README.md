@@ -18,13 +18,14 @@ pribadi/keluarga, dan tetap di-deploy ke Vercel.
 
 1. Di dashboard Supabase, buka **SQL Editor** (ikon di sidebar kiri) → **New query**.
 2. Copy-paste seluruh isi file `supabase/schema.sql` yang ada di folder ini.
-3. Klik **Run**. Ini akan membuat 6 tabel (`profiles`, `meals`, `vitamins`,
-   `vitamin_checks`, `journal_entries`, `journal_attachments`) lengkap dengan
-   Row Level Security — jadi tiap pengguna hanya bisa lihat & ubah datanya
-   sendiri — **dan** sebuah Storage bucket privat `journal-media` (untuk
-   foto/video/voice note di jurnal) dengan batas 45MB per file dan RLS yang
-   sama (per-pemilik). Aman dijalankan ulang kalau nanti ada update skema —
-   tabel & bucket yang sudah ada tidak akan tertimpa/hilang datanya.
+3. Klik **Run**. Ini akan membuat tabel-tabel (`profiles`, `meals`, `vitamins`,
+   `vitamin_checks`, `journal_entries`, `journal_attachments`, `baby_names`,
+   `chat_messages`) lengkap dengan Row Level Security — jadi tiap pengguna
+   hanya bisa lihat & ubah datanya sendiri — **dan** sebuah Storage bucket
+   privat `journal-media` (untuk foto/video/voice note di jurnal) dengan batas
+   45MB per file dan RLS yang sama (per-pemilik). Aman dijalankan ulang kalau
+   nanti ada update skema — tabel & bucket yang sudah ada tidak akan
+   tertimpa/hilang datanya.
 
 ### 3. Ambil API key
 
@@ -44,11 +45,14 @@ Supaya proses daftar akun langsung bisa dipakai tanpa perlu klik link di email:
 
 ## 5. (Opsional) Aktifkan chat gizi AI
 
-Fitur ini membuka tab **Chat** di dashboard — kirim foto makanan/minuman lewat
-chat di dalam app, AI (Gemini, gratis) menganalisis kandungan gizinya dan
-membalas dengan insight singkat, lalu otomatis menyimpannya ke menu hari ini.
-Semua terjadi di dalam app pakai akun yang sudah login — tidak perlu nomor
-WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
+Fitur ini membuka tab **Chat** di dashboard — obrolan biasa dengan AI (Gemini,
+gratis) soal kehamilan & gizi. Kalau kamu cerita atau kirim foto
+makanan/minuman yang kamu makan, Bloom mengenalinya sebagai permintaan
+mencatat: dianalisis kandungan gizinya, dibalas dengan insight singkat, dan
+kamu tinggal klik "Simpan ke Dashboard" untuk memasukkannya ke menu hari ini
+(tidak otomatis tersimpan). Semua terjadi di dalam app pakai akun yang sudah
+login — tidak perlu nomor WhatsApp, akun Meta, atau setup tambahan apa pun
+selain langkah di bawah.
 
 1. Buat API key gratis di https://aistudio.google.com/apikey → **Create API
    key**. Tidak perlu kartu kredit untuk tier gratisnya.
@@ -61,7 +65,7 @@ WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
 3. Kalau belum, jalankan ulang `supabase/schema.sql` (lihat langkah 2 di atas)
    — aman dijalankan ulang, tidak menghapus data yang sudah ada.
 
-Tanpa `GEMINI_API_KEY` diisi, tab Chat tetap muncul tapi analisis fotonya akan
+Tanpa `GEMINI_API_KEY` diisi, tab Chat tetap muncul tapi setiap pesan akan
 gagal dengan pesan error yang jelas — fitur lain di Bloom tidak terpengaruh.
 
 ## Coba di komputer sendiri dulu (opsional)
@@ -107,7 +111,9 @@ app/
   login/page.js          → form login & daftar (Supabase Auth)
   dashboard/page.js       → dashboard utama (rings, checklist vitamin, tren, riwayat)
   dashboard/journal/page.js → jurnal harian (catatan + mood + foto/video/voice note)
-  dashboard/chat/page.js  → chat gizi AI (kirim foto makanan, dapat analisis + insight)
+  dashboard/chat/page.js  → chat gizi AI (kirim foto makanan, dapat analisis + insight,
+                             riwayat chat tersimpan, "Simpan ke Dashboard" per hasil analisis)
+  dashboard/baby-names/page.js → daftar calon nama bayi (favorit, gender, catatan/arti)
   api/nutrition-chat/route.js → satu-satunya route backend: proxy terautentikasi ke
                                  Gemini API buat analisis foto (tidak menyentuh database —
                                  client yang menyimpan hasilnya ke `meals` sendiri)
@@ -117,6 +123,7 @@ lib/
   supabaseServer.js      → koneksi ke Supabase dari server, baca sesi login dari cookie
                             (bukan service role — cuma buat mengecek "siapa yang chat")
   nutrition.js           → target gizi per trimester, parser CSV, dll
+  pregnancy.js           → usia kehamilan/HPL dari HPHT (Naegele's rule), dihitung bukan disimpan
   journal.js             → daftar mood + konstanta lampiran jurnal (limit ukuran/jumlah file)
   gemini.js              → pemanggil Gemini API untuk analisis gizi dari foto makanan
 supabase/
@@ -147,9 +154,27 @@ supabase/
   Supabase Storage sendiri: 1GB total storage, 5GB bandwidth/bulan — video
   paling cepat menghabiskan kuota, jadi pantau pemakaiannya kalau sering
   upload video.
-- Chat gizi AI (opsional, lihat bagian 5 di atas) memakai Gemini untuk menebak
-  kandungan gizi dari foto — hasilnya estimasi, bukan pengukuran lab, dan menu
-  hasil tebakan tetap bisa diedit/dihapus manual dari dashboard kalau meleset.
-  Fotonya tidak disimpan di Bloom, cuma dikirim ke Gemini untuk dianalisis lalu
-  dibuang. Tier gratis Gemini punya batas rate limit harian; untuk pemakaian
-  pribadi/keluarga biasanya jauh dari batas tersebut.
+- Chat gizi AI (opsional, lihat bagian 5 di atas) adalah obrolan bebas — bisa
+  dipakai untuk ngobrol/tanya-tanya biasa, dan Gemini sendiri yang menentukan
+  kapan suatu pesan (teks dan/atau foto) itu cerita soal makanan/minuman yang
+  perlu dicatat vs. sekadar obrolan. Untuk yang perlu dicatat, kandungan
+  gizinya cuma estimasi (bukan pengukuran lab) dan harus dikonfirmasi lewat
+  tombol "Simpan ke Dashboard" dulu sebelum masuk ke menu hari ini (tidak
+  otomatis) — tetap bisa diedit/dihapus manual dari dashboard kalau meleset.
+  Foto bisa dilampirkan lewat tombol 🖼️, drag-and-drop ke panel chat, atau
+  paste dari clipboard. Fotonya sendiri tidak disimpan di Bloom, cuma dikirim
+  ke Gemini untuk
+  dianalisis lalu dibuang — riwayat chat (`chat_messages`) menyimpan teks dan
+  hasil analisisnya saja, bukan fotonya. Tier gratis Gemini punya batas rate
+  limit harian; untuk pemakaian pribadi/keluarga biasanya jauh dari batas
+  tersebut.
+- Usia kehamilan dihitung dari HPHT (Hari Pertama Haid Terakhir) yang diisi di
+  panel "Usia kehamilan" pada dashboard — HPL (perkiraan lahir) dan progress
+  ke minggu ke-40 otomatis ikut terhitung (aturan Naegele: HPHT + 280 hari).
+  Cuma perkiraan kalender, bukan pengganti perhitungan USG dokter.
+- Panel utama dashboard punya "Lompat ke tanggal lain" di samping navigasi
+  hari — jadi kamu bisa mengisi data untuk tanggal apa pun di masa lalu
+  (backdate), bukan cuma tanggal yang sudah ada datanya.
+- Daftar calon nama bayi (`baby_names`) murni untuk brainstorming pribadi —
+  belum ada fitur berbagi/kolaborasi lintas akun (mis. dengan pasangan), jadi
+  kalau berdua-duaan mencatat, sepakati dulu satu akun yang dipakai.

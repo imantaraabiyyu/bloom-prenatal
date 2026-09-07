@@ -168,6 +168,20 @@ button, input { font-family: inherit; }
 .day-nav button { background: rgba(243,237,233,0.08); border: none; color: var(--text); width: 26px; height: 26px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .day-nav button:disabled { opacity: .3; cursor: default; }
 .date-select { margin-top: 10px; background: rgba(243,237,233,0.08); border: none; color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 6px 10px; border-radius: 8px; }
+.date-jump { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.date-jump label { font-size: 11px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; }
+.date-jump input { background: rgba(0,0,0,0.2); border: 1px solid rgba(243,237,233,0.18); color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; padding: 8px 10px; border-radius: 8px; align-self: flex-start; }
+.date-jump input:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- Usia kehamilan (HPHT/HPL/progress) ---------- */
+.hpht-form { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.hpht-form input[type="date"] { padding: 11px 12px; border-radius: 10px; border: 1px solid rgba(243,237,233,0.18); background: rgba(0,0,0,0.2); color: var(--text); font-size: 13.5px; }
+.hpht-form input[type="date"]:focus { outline: none; border-color: var(--accent); }
+.pregnancy-stats { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 14px; }
+.pregnancy-stat { display: flex; flex-direction: column; gap: 4px; }
+.pregnancy-stat-value { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 500; }
+.pregnancy-stat-label { font-size: 11px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .05em; }
+.pregnancy-progress-label { margin-top: 8px; font-size: 12px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; }
 
 /* ---------- Vitamin checklist ---------- */
 .vitamin-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(243,237,233,0.06); }
@@ -179,6 +193,24 @@ button, input { font-family: inherit; }
 .vitamin-remove { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 16px; padding: 4px 6px; border-radius: 6px; }
 .vitamin-remove:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
 .vitamin-empty { font-size: 12.5px; color: var(--text-dimmer); padding: 8px 0; }
+
+/* ---------- Nama Bayi ---------- */
+.babyname-gender-select { padding: 11px 12px; border-radius: 10px; border: 1px solid rgba(243,237,233,0.18); background: rgba(0,0,0,0.2); color: var(--text); font-size: 13.5px; min-width: 150px; }
+.babyname-gender-select:focus { outline: none; border-color: var(--accent); }
+.name-filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.name-filter-btn { font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 8px 14px; border-radius: 100px; border: 1px solid rgba(243,237,233,0.2); background: transparent; color: var(--text-dim); cursor: pointer; }
+.name-filter-btn.active { background: var(--accent); color: #2B1B2E; border-color: var(--accent); font-weight: 500; }
+.babyname-empty { font-size: 12.5px; color: var(--text-dimmer); padding: 8px 0; }
+.babyname-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid rgba(243,237,233,0.06); }
+.babyname-row:last-child { border-bottom: none; }
+.babyname-star { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 18px; padding: 2px 4px; flex-shrink: 0; line-height: 1.3; }
+.babyname-star.active { color: var(--accent); }
+.babyname-info { flex: 1; min-width: 0; }
+.babyname-name { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gender-pill { font-size: 10.5px; font-family: 'IBM Plex Mono', monospace; padding: 2px 8px; border-radius: 100px; border: 1px solid; font-weight: 500; }
+.babyname-note { font-size: 12px; color: var(--text-dimmer); margin-top: 3px; line-height: 1.5; }
+.babyname-remove { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; padding: 4px 6px; border-radius: 6px; flex-shrink: 0; }
+.babyname-remove:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
 
 /* ---------- Nutrient list ---------- */
 .nutrient-row { display: grid; grid-template-columns: 110px 1fr 120px; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid rgba(243,237,233,0.06); }
@@ -263,10 +295,22 @@ button, input { font-family: inherit; }
 .chat-msg-row.user .chat-bubble { background: var(--accent); color: #2B1B2E; border-bottom-right-radius: 4px; }
 .chat-msg-row.assistant .chat-bubble { background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); border-bottom-left-radius: 4px; }
 .chat-bubble-image { display: block; max-width: 200px; border-radius: 12px; margin-bottom: 8px; }
-.chat-bubble-actions { margin-top: 8px; display: flex; gap: 10px; align-items: center; }
+.chat-photo-placeholder { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-faint); background: rgba(243,237,233,0.05); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+/* user bubbles sit on the light accent color, not the dark panel bg — the
+   default muted color above would be low-contrast there */
+.chat-msg-row.user .chat-photo-placeholder { color: rgba(43,27,46,0.65); background: rgba(43,27,46,0.08); }
+.chat-bubble-actions { margin-top: 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .chat-bubble-actions button { background: none; border: none; color: var(--rose); font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
+.chat-bubble-actions .chat-save-meal-btn { background: var(--accent); color: #2B1B2E; text-decoration: none; font-weight: 600; padding: 8px 14px; border-radius: 8px; }
+.chat-bubble-actions .chat-save-meal-btn:disabled { opacity: .6; cursor: default; }
+.chat-bubble-actions .chat-save-meal-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.chat-save-error { margin-top: 6px; font-size: 11.5px; color: #E8B8A8; }
 .chat-saved-tag { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--sage); }
 .chat-typing { font-style: italic; color: var(--text-dimmer); }
+.chat-drag-active { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(227,182,94,0.04); }
+.chat-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.chat-clear-btn { background: none; border: none; color: var(--text-faint); font-size: 11.5px; cursor: pointer; padding: 4px 6px; text-decoration: underline; }
+.chat-clear-btn:hover { color: var(--rose); }
 .chat-input-area { display: flex; flex-direction: column; gap: 10px; }
 .chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
 .chat-input-row textarea { flex: 1; resize: none; min-height: 44px; max-height: 120px; padding: 11px 12px; border-radius: 12px; border: 1px solid rgba(243,237,233,0.18); background: rgba(0,0,0,0.2); color: var(--text); font-size: 14px; font-family: inherit; line-height: 1.4; }
