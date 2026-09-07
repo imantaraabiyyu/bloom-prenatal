@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
-import { transcribeVoiceNote } from "@/lib/gemini";
+import { streamTranscribeVoiceNote, GeminiHttpError } from "@/lib/gemini";
 
 // Second (and only other) backend route in this app, alongside
 // /api/nutrition-chat — same shape: a thin authenticated proxy to Gemini,
@@ -9,6 +9,12 @@ import { transcribeVoiceNote } from "@/lib/gemini";
 // just-recorded voice note into a verbatim transcript + a tidied version
 // the user can drop straight into their journal note, before the entry is
 // even saved.
+//
+// Streams its response as newline-delimited JSON, same protocol as
+// nutrition-chat:
+//   {"type":"progress","transcript":"...","tidiedNote":"..."} — as text fills in
+//   {"type":"done","result":{...}}  — once, the final sanitized result
+//   {"type":"error","error":"..."}  — instead of "done", if something failed
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -39,15 +45,31 @@ export async function POST(request) {
     return NextResponse.json({ error: "Rekamannya terlalu besar untuk ditranskrip." }, { status: 413 });
   }
 
-  try {
-    const result = await transcribeVoiceNote({ base64: audio.base64, mimeType: audio.mimeType });
-    return NextResponse.json({ result });
-  } catch (e) {
-    console.error("journal transcribe error:", e);
-    const busy = e?.status === 503 || e?.status === 429;
-    return NextResponse.json(
-      { error: busy ? "Gemini lagi ramai dipakai. Coba lagi dalam beberapa saat ya." : "Gagal mentranskrip voice note ini. Coba lagi sebentar lagi." },
-      { status: 502 }
-    );
-  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      try {
+        const result = await streamTranscribeVoiceNote({ base64: audio.base64, mimeType: audio.mimeType }, (progress) => {
+          send({ type: "progress", ...progress });
+        });
+        send({ type: "done", result });
+      } catch (e) {
+        console.error("journal transcribe stream error:", e);
+        const busy = e instanceof GeminiHttpError && (e.status === 503 || e.status === 429);
+        send({
+          type: "error",
+          error: busy
+            ? "Gemini lagi ramai dipakai. Coba lagi dalam beberapa saat ya."
+            : "Gagal mentranskrip voice note ini. Coba lagi sebentar lagi.",
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache" },
+  });
 }

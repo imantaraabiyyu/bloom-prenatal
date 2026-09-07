@@ -315,6 +315,12 @@ button, input { font-family: inherit; }
 .transcript-raw p { margin: 6px 0 0; white-space: pre-wrap; line-height: 1.5; }
 .transcribe-use-btn { align-self: flex-start; background: var(--accent); color: #2B1B2E; border: none; font-weight: 600; font-size: 12px; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
 .transcribe-use-btn:hover { filter: brightness(1.05); }
+/* the unmissable prompt right after a recording stops */
+.transcribe-prompt { background: rgba(227,182,94,0.08); border: 1px solid rgba(227,182,94,0.3); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.transcribe-prompt p { margin: 0; font-size: 13px; color: #e8dde5; }
+.transcribe-prompt-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.transcript-preview-text.muted { color: var(--text-dimmer); }
+.retry-inline-btn { background: none; border: none; color: inherit; text-decoration: underline; font-size: inherit; cursor: pointer; padding: 0; }
 
 .entry-attachments { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .entry-attachment { position: relative; }
