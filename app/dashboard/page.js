@@ -7,7 +7,7 @@ import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
   parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
-  statusForPct,
+  statusForPct, slugifyNutrientLabel, mergeExtraNutrients,
 } from "@/lib/nutrition";
 
 function downloadText(filename, text) {
@@ -51,6 +51,7 @@ export default function Dashboard() {
   const [vitFormOpen, setVitFormOpen] = useState(false);
   const [vitFormName, setVitFormName] = useState("");
   const [vitFormValues, setVitFormValues] = useState({});
+  const [vitFormExtra, setVitFormExtra] = useState([]); // [{ label, unit, value }] — nutrients outside NUTRIENT_ORDER
   const [vitFormSaving, setVitFormSaving] = useState(false);
   const [vitFormError, setVitFormError] = useState("");
 
@@ -133,7 +134,17 @@ export default function Dashboard() {
     return totals;
   }
 
+  // Custom (non-NUTRIENT_ORDER) nutrients from every checked vitamin that
+  // day — informational only, no target/ring (see lib/nutrition.js).
+  function extraTotals(date) {
+    const checks = vitaminChecks[date] || {};
+    const merged = {};
+    vitamins.forEach((v) => { if (checks[v.id]) mergeExtraNutrients(merged, v.extra_nutrients); });
+    return merged;
+  }
+
   const totals = currentDate ? dayTotals(currentDate) : {};
+  const todaysExtraTotals = currentDate ? extraTotals(currentDate) : {};
   const datesWithMeals = dates.filter((d) => meals.some((r) => r.date === d));
   const todaysMeals = currentDate ? meals.filter((r) => r.date === currentDate) : [];
   const waterTotal = totals.water_ml || 0;
@@ -251,12 +262,24 @@ export default function Dashboard() {
     setVitFormOpen(true);
     setVitFormName("");
     setVitFormValues({});
+    setVitFormExtra([]);
     setVitFormError("");
   }
 
   function closeVitForm() {
     setVitFormOpen(false);
     setVitFormError("");
+  }
+
+  // "nutrisi lain" rows — anything not in NUTRIENT_ORDER (Zinc, Vitamin B6, ...)
+  function addVitExtraRow() {
+    setVitFormExtra((prev) => [...prev, { label: "", unit: "", value: "" }]);
+  }
+  function updateVitExtraRow(idx, field, value) {
+    setVitFormExtra((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+  function removeVitExtraRow(idx) {
+    setVitFormExtra((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function handleAddVitamin() {
@@ -269,12 +292,21 @@ export default function Dashboard() {
       const v = parseFloat(vitFormValues[n]);
       row[n] = isNaN(v) ? 0 : v;
     });
+    const extraNutrients = {};
+    vitFormExtra.forEach((r) => {
+      const label = r.label.trim();
+      const value = parseFloat(r.value);
+      if (!label || isNaN(value)) return; // incomplete rows are silently dropped, not saved as zero
+      extraNutrients[slugifyNutrientLabel(label)] = { label, unit: r.unit.trim(), value };
+    });
+    row.extra_nutrients = extraNutrients;
     const { data, error } = await supabase.from("vitamins").insert(row).select().maybeSingle();
     setVitFormSaving(false);
     if (error) { setVitFormError("⚠ " + error.message); return; }
     setVitamins((prev) => [...prev, data]);
     setVitFormName("");
     setVitFormValues({});
+    setVitFormExtra([]);
   }
 
   async function toggleVitaminCheck(vitaminId, checked) {
@@ -364,6 +396,7 @@ export default function Dashboard() {
         <div className="topbar-nav">
           <Link href="/dashboard" className="nav-link active">Dashboard</Link>
           <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
+          <Link href="/dashboard/chat" className="nav-link">Chat</Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -413,7 +446,8 @@ export default function Dashboard() {
             <div className="format-hint">
               Kolom yang dikenali: <code>date</code>, <code>meal</code>, <code>calories</code>, <code>protein_g</code>,{" "}
               <code>iron_mg</code>, <code>calcium_mg</code>, <code>folate_mcg</code>, <code>vitamin_d_mcg</code>,{" "}
-              <code>fiber_g</code>, <code>water_ml</code>. Baris dengan tanggal sama akan dijumlahkan otomatis.
+              <code>fiber_g</code>, <code>water_ml</code>, <code>dha_mg</code>, <code>vitamin_k_mcg</code>. Baris dengan
+              tanggal sama akan dijumlahkan otomatis.
             </div>
 
             <button className="manual-form-toggle" onClick={() => (mealFormOpen ? closeMealForm() : openMealForm())}>
@@ -496,6 +530,33 @@ export default function Dashboard() {
                     );
                   })}
                 </div>
+
+                <div className="extra-nutrient-section">
+                  <label className="extra-nutrient-label">Nutrisi lain (opsional) — kalau ada yang tidak ada di daftar di atas, mis. Zinc, Vitamin B6, Iodium</label>
+                  {vitFormExtra.length > 0 && (
+                    <div className="extra-nutrient-list">
+                      {vitFormExtra.map((r, i) => (
+                        <div className="extra-nutrient-row" key={i}>
+                          <input
+                            type="text" placeholder="Nama (mis. Zinc)"
+                            value={r.label} onChange={(e) => updateVitExtraRow(i, "label", e.target.value)}
+                          />
+                          <input
+                            type="number" inputMode="decimal" min="0" step="any" placeholder="Jumlah"
+                            value={r.value} onChange={(e) => updateVitExtraRow(i, "value", e.target.value)}
+                          />
+                          <input
+                            type="text" placeholder="Satuan (mis. mg)"
+                            value={r.unit} onChange={(e) => updateVitExtraRow(i, "unit", e.target.value)}
+                          />
+                          <button type="button" onClick={() => removeVitExtraRow(i)} title="Hapus baris ini">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button type="button" className="extra-nutrient-add" onClick={addVitExtraRow}>+ Tambah nutrisi lain</button>
+                </div>
+
                 {vitFormError && <div className="error-box">{vitFormError}</div>}
                 <div className="manual-form-actions">
                   <button className="manual-form-save" onClick={handleAddVitamin} disabled={vitFormSaving}>
@@ -585,7 +646,10 @@ export default function Dashboard() {
           ) : (
             vitamins.map((v) => {
               const checked = !!(vitaminChecks[currentDate]?.[v.id]);
-              const detailParts = NUTRIENT_ORDER.filter((n) => v[n]).map((n) => `${NUTRIENT_META[n].label} ${v[n]}${NUTRIENT_META[n].unit}`);
+              const detailParts = [
+                ...NUTRIENT_ORDER.filter((n) => v[n]).map((n) => `${NUTRIENT_META[n].label} ${v[n]}${NUTRIENT_META[n].unit}`),
+                ...Object.values(v.extra_nutrients || {}).filter((e) => e?.label).map((e) => `${e.label} ${e.value}${e.unit || ""}`),
+              ];
               return (
                 <div className="vitamin-row" key={v.id}>
                   <input type="checkbox" className="vitamin-check" checked={checked} onChange={(e) => toggleVitaminCheck(v.id, e.target.checked)} />
@@ -599,6 +663,19 @@ export default function Dashboard() {
             })
           )}
         </div>
+
+        {/* Nutrisi tambahan (custom, di luar NUTRIENT_ORDER) dari vitamin yang dicentang hari ini */}
+        {currentDate && Object.keys(todaysExtraTotals).length > 0 && (
+          <div className="panel full">
+            <h3>Nutrisi lain — {currentDate}</h3>
+            <div className="extra-today-list">
+              {Object.entries(todaysExtraTotals).map(([slug, e]) => (
+                <span className="extra-today-chip" key={slug}>{e.label} {Math.round(e.value * 100) / 100}{e.unit}</span>
+              ))}
+            </div>
+            <p className="format-hint" style={{ marginTop: 10 }}>Nutrisi tambahan — belum ada target harian bawaan untuk ini, jadi hanya ditampilkan sebagai catatan.</p>
+          </div>
+        )}
 
         {/* Cairan + menu hari ini */}
         {currentDate && (
@@ -638,7 +715,10 @@ export default function Dashboard() {
                 return (
                   <div className="meal-list-item" key={m.id}>
                     <div className="meal-list-info">
-                      <div className="meal-list-name">{m.meal || "Tanpa nama"}</div>
+                      <div className="meal-list-name">
+                        {m.meal || "Tanpa nama"}
+                        {m.source === "chat" && <span className="meal-source-badge" title="Dicatat otomatis lewat foto di Chat">💬</span>}
+                      </div>
                       <div className="meal-list-detail">{detailParts.join(" · ") || "tanpa data gizi"}</div>
                     </div>
                     <button className="meal-list-remove" title="Hapus menu ini" onClick={() => handleDeleteMeal(m.id)}>✕</button>

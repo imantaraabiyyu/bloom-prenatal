@@ -42,6 +42,28 @@ Supaya proses daftar akun langsung bisa dipakai tanpa perlu klik link di email:
    (Kalau dibiarkan aktif, setelah daftar pengguna harus klik link konfirmasi di
    inbox emailnya dulu sebelum bisa login — juga valid, cuma satu langkah ekstra.)
 
+## 5. (Opsional) Aktifkan chat gizi AI
+
+Fitur ini membuka tab **Chat** di dashboard — kirim foto makanan/minuman lewat
+chat di dalam app, AI (Gemini, gratis) menganalisis kandungan gizinya dan
+membalas dengan insight singkat, lalu otomatis menyimpannya ke menu hari ini.
+Semua terjadi di dalam app pakai akun yang sudah login — tidak perlu nomor
+WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
+
+1. Buat API key gratis di https://aistudio.google.com/apikey → **Create API
+   key**. Tidak perlu kartu kredit untuk tier gratisnya.
+2. Tambahkan ke `.env.local` (lokal) **dan** Vercel → Project Settings →
+   Environment Variables (produksi):
+   ```
+   GEMINI_API_KEY=...               # dari langkah 1
+   GEMINI_MODEL=gemini-2.0-flash    # opsional, ini nilai defaultnya
+   ```
+3. Kalau belum, jalankan ulang `supabase/schema.sql` (lihat langkah 2 di atas)
+   — aman dijalankan ulang, tidak menghapus data yang sudah ada.
+
+Tanpa `GEMINI_API_KEY` diisi, tab Chat tetap muncul tapi analisis fotonya akan
+gagal dengan pesan error yang jelas — fitur lain di Bloom tidak terpengaruh.
+
 ## Coba di komputer sendiri dulu (opsional)
 
 ```
@@ -85,11 +107,18 @@ app/
   login/page.js          → form login & daftar (Supabase Auth)
   dashboard/page.js       → dashboard utama (rings, checklist vitamin, tren, riwayat)
   dashboard/journal/page.js → jurnal harian (catatan + mood + foto/video/voice note)
+  dashboard/chat/page.js  → chat gizi AI (kirim foto makanan, dapat analisis + insight)
+  api/nutrition-chat/route.js → satu-satunya route backend: proxy terautentikasi ke
+                                 Gemini API buat analisis foto (tidak menyentuh database —
+                                 client yang menyimpan hasilnya ke `meals` sendiri)
   globals.css             → tema visual (dark plum)
 lib/
-  supabaseClient.js      → koneksi ke Supabase
+  supabaseClient.js      → koneksi ke Supabase dari browser (anon key)
+  supabaseServer.js      → koneksi ke Supabase dari server, baca sesi login dari cookie
+                            (bukan service role — cuma buat mengecek "siapa yang chat")
   nutrition.js           → target gizi per trimester, parser CSV, dll
   journal.js             → daftar mood + konstanta lampiran jurnal (limit ukuran/jumlah file)
+  gemini.js              → pemanggil Gemini API untuk analisis gizi dari foto makanan
 supabase/
   schema.sql              → skema tabel + storage bucket + Row Level Security
 ```
@@ -100,6 +129,12 @@ supabase/
 - Nilai gizi contoh untuk Folamil Genio & Cavit D3 diambil dari label umum
   produk — sesuaikan dengan kemasan asli/anjuran dokter kamu lewat panel
   upload CSV vitamin di dashboard.
+- Kalau vitamin/suplemenmu punya kandungan yang tidak ada di daftar gizi utama
+  (mis. Zinc, Vitamin B6, Iodium), tambahkan lewat "+ Tambah nutrisi lain" di
+  form manual vitamin. Nutrisi ini ditampilkan sebagai catatan harian (jumlah
+  dari semua vitamin yang dicentang hari itu) tanpa target/ring — belum ada
+  patokan AKG bawaan untuk nutrisi bebas seperti ini. Belum didukung lewat
+  upload CSV, cuma lewat form manual.
 - Data sekarang tersimpan di Supabase (Postgres) dengan Row Level Security,
   jauh lebih aman daripada versi localStorage sebelumnya — tapi tetap bukan
   aplikasi medis resmi, hanya alat bantu pencatatan pribadi.
@@ -112,3 +147,9 @@ supabase/
   Supabase Storage sendiri: 1GB total storage, 5GB bandwidth/bulan — video
   paling cepat menghabiskan kuota, jadi pantau pemakaiannya kalau sering
   upload video.
+- Chat gizi AI (opsional, lihat bagian 5 di atas) memakai Gemini untuk menebak
+  kandungan gizi dari foto — hasilnya estimasi, bukan pengukuran lab, dan menu
+  hasil tebakan tetap bisa diedit/dihapus manual dari dashboard kalau meleset.
+  Fotonya tidak disimpan di Bloom, cuma dikirim ke Gemini untuk dianalisis lalu
+  dibuang. Tier gratis Gemini punya batas rate limit harian; untuk pemakaian
+  pribadi/keluarga biasanya jauh dari batas tersebut.

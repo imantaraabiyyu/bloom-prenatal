@@ -1,6 +1,17 @@
 -- Bloom — skema database Supabase (Postgres)
 -- Jalankan file ini di Supabase Dashboard → SQL Editor → New query → Run.
 
+-- ================= CLEANUP: bekas fitur agen WhatsApp =================
+-- Fitur logging gizi lewat WhatsApp sempat ada di versi sebelumnya, lalu
+-- diganti dengan chat AI langsung di dalam app (tidak perlu Meta/nomor
+-- WhatsApp lagi). Blok ini membersihkan sisa tabel/kolomnya kalau kamu sempat
+-- menjalankan versi schema yang lama — aman dijalankan juga kalau belum
+-- pernah ada (semua "if exists").
+drop table if exists public.whatsapp_link_codes;
+drop table if exists public.whatsapp_messages;
+alter table if exists public.profiles drop column if exists phone_number;
+alter table if exists public.profiles drop column if exists phone_verified_at;
+
 -- 1) Profil (menyimpan trimester per pengguna)
 create table if not exists public.profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -25,6 +36,17 @@ create table if not exists public.meals (
   created_at timestamptz not null default now()
 );
 create index if not exists meals_user_date_idx on public.meals (user_id, date);
+-- Menandai menu yang tercatat otomatis lewat foto di Chat (vs. diisi manual
+-- di dashboard) supaya bisa ditampilkan beda di riwayat. Constraint di-drop +
+-- dibuat ulang terpisah (bukan inline di ADD COLUMN) supaya kalau kolom ini
+-- sudah ada dari versi lama (waktu nilainya masih 'whatsapp'), constraint-nya
+-- ikut ter-update ke nilai yang sekarang valid.
+alter table public.meals add column if not exists source text not null default 'manual';
+alter table public.meals drop constraint if exists meals_source_check;
+alter table public.meals add constraint meals_source_check check (source in ('manual','chat'));
+-- DHA & vitamin K — nutrisi tambahan yang dilacak (lihat NUTRIENT_ORDER di lib/nutrition.js).
+alter table public.meals add column if not exists dha_mg numeric default 0;
+alter table public.meals add column if not exists vitamin_k_mcg numeric default 0;
 
 -- 3) Katalog vitamin/suplemen milik pengguna
 create table if not exists public.vitamins (
@@ -41,6 +63,12 @@ create table if not exists public.vitamins (
   water_ml numeric default 0,
   created_at timestamptz not null default now()
 );
+alter table public.vitamins add column if not exists dha_mg numeric default 0;
+alter table public.vitamins add column if not exists vitamin_k_mcg numeric default 0;
+-- Free-form nutrients not in the fixed list above (mis. Zinc, Vitamin B6,
+-- Iodium) — { [slug]: { label, unit, value } }, ditambahkan lewat form manual
+-- di dashboard (lihat lib/nutrition.js -> slugifyNutrientLabel/mergeExtraNutrients).
+alter table public.vitamins add column if not exists extra_nutrients jsonb not null default '{}'::jsonb;
 
 -- 4) Checklist vitamin per tanggal
 create table if not exists public.vitamin_checks (
