@@ -43,16 +43,22 @@ Supaya proses daftar akun langsung bisa dipakai tanpa perlu klik link di email:
    (Kalau dibiarkan aktif, setelah daftar pengguna harus klik link konfirmasi di
    inbox emailnya dulu sebelum bisa login — juga valid, cuma satu langkah ekstra.)
 
-## 5. (Opsional) Aktifkan chat gizi AI
+## 5. (Opsional) Aktifkan fitur AI (chat gizi + transkrip voice note)
 
-Fitur ini membuka tab **Chat** di dashboard — obrolan biasa dengan AI (Gemini,
-gratis) soal kehamilan & gizi. Kalau kamu cerita atau kirim foto
-makanan/minuman yang kamu makan, Bloom mengenalinya sebagai permintaan
-mencatat: dianalisis kandungan gizinya, dibalas dengan insight singkat, dan
-kamu tinggal klik "Simpan ke Dashboard" untuk memasukkannya ke menu hari ini
-(tidak otomatis tersimpan). Semua terjadi di dalam app pakai akun yang sudah
-login — tidak perlu nomor WhatsApp, akun Meta, atau setup tambahan apa pun
-selain langkah di bawah.
+Satu API key Gemini yang sama menghidupkan dua fitur:
+
+- Tab **Chat** di dashboard — obrolan biasa dengan AI soal kehamilan & gizi.
+  Kalau kamu cerita atau kirim foto makanan/minuman yang kamu makan, Bloom
+  mengenalinya sebagai permintaan mencatat: dianalisis kandungan gizinya,
+  dibalas dengan insight singkat, dan kamu tinggal klik "Simpan ke Dashboard"
+  untuk memasukkannya ke menu hari ini (tidak otomatis tersimpan).
+- Tombol "📝 Transkrip & rapikan jadi jurnal" di **Jurnal**, muncul di setiap
+  voice note yang baru direkam (sebelum catatannya disimpan) — menghasilkan
+  transkrip apa adanya plus draf jurnal yang sudah dirapikan, tinggal klik
+  "Gunakan sebagai catatan" untuk menempelkannya ke kolom catatan.
+
+Semua terjadi di dalam app pakai akun yang sudah login — tidak perlu nomor
+WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
 
 1. Buat API key gratis di https://aistudio.google.com/apikey → **Create API
    key**. Tidak perlu kartu kredit untuk tier gratisnya.
@@ -67,8 +73,9 @@ selain langkah di bawah.
 3. Kalau belum, jalankan ulang `supabase/schema.sql` (lihat langkah 2 di atas)
    — aman dijalankan ulang, tidak menghapus data yang sudah ada.
 
-Tanpa `GEMINI_API_KEY` diisi, tab Chat tetap muncul tapi setiap pesan akan
-gagal dengan pesan error yang jelas — fitur lain di Bloom tidak terpengaruh.
+Tanpa `GEMINI_API_KEY` diisi, tab Chat dan tombol transkrip di Jurnal tetap
+muncul tapi akan gagal dengan pesan error yang jelas — fitur lain di Bloom
+tidak terpengaruh.
 
 ## Coba di komputer sendiri dulu (opsional)
 
@@ -112,16 +119,18 @@ app/
   page.js               → redirect ke /dashboard atau /login
   login/page.js          → form login & daftar (Supabase Auth)
   dashboard/page.js       → dashboard utama (rings, checklist vitamin, tren, riwayat)
-  dashboard/journal/page.js → jurnal harian (catatan + mood + foto/video/voice note)
+  dashboard/journal/page.js → jurnal harian (catatan + mood + foto/video/voice note,
+                               transkrip AI dari voice note sebelum catatan disimpan)
   dashboard/chat/page.js  → chat gizi AI (kirim foto makanan, dapat analisis + insight,
                              riwayat chat tersimpan, "Simpan ke Dashboard" per hasil analisis)
   dashboard/profile/page.js → profil kehamilan: usia kehamilan/HPL dari HPHT, dan daftar
                                calon nama bayi (favorit, gender, catatan/arti)
-  api/nutrition-chat/route.js → satu-satunya route backend: proxy terautentikasi ke
-                                 Gemini API, dialirkan sebagai newline-delimited JSON
-                                 (balasan Bloom muncul progresif, bukan sekaligus di akhir) —
-                                 tidak menyentuh database, client yang menyimpan hasilnya
-                                 ke `meals` sendiri
+  api/nutrition-chat/route.js → proxy terautentikasi ke Gemini API buat chat, dialirkan
+                                 sebagai newline-delimited JSON (balasan Bloom muncul
+                                 progresif) — tidak menyentuh database, client yang
+                                 menyimpan hasilnya ke `meals` sendiri
+  api/journal/transcribe/route.js → proxy terautentikasi ke Gemini API buat transkrip +
+                                     merapikan voice note jurnal (juga tidak menyentuh database)
   globals.css             → tema visual (dark plum)
 components/
   ConfirmButton.js       → tombol hapus dengan konfirmasi inline "[Ya, hapus] [Batal]"
@@ -129,12 +138,12 @@ components/
 lib/
   supabaseClient.js      → koneksi ke Supabase dari browser (anon key)
   supabaseServer.js      → koneksi ke Supabase dari server, baca sesi login dari cookie
-                            (bukan service role — cuma buat mengecek "siapa yang chat")
+                            (bukan service role — cuma buat mengecek "siapa yang chat/transkrip")
   nutrition.js           → target gizi per trimester, parser CSV, dll
   pregnancy.js           → usia kehamilan/HPL dari HPHT (Naegele's rule), dihitung bukan disimpan
   journal.js             → daftar mood + konstanta lampiran jurnal (limit ukuran/jumlah file)
-  gemini.js              → panggilan streaming ke Gemini API + parser JSON parsial
-                            (buat menampilkan balasan sambil masih ditulis modelnya)
+  gemini.js              → semua panggilan ke Gemini API: chat (streaming + parser JSON
+                            parsial) dan transkrip voice note jurnal
 supabase/
   schema.sql              → skema tabel + storage bucket + Row Level Security
 ```
@@ -163,6 +172,13 @@ supabase/
   Supabase Storage sendiri: 1GB total storage, 5GB bandwidth/bulan — video
   paling cepat menghabiskan kuota, jadi pantau pemakaiannya kalau sering
   upload video.
+- Transkrip voice note (opsional, butuh `GEMINI_API_KEY`, lihat bagian 5)
+  cuma tersedia saat menulis catatan baru — buka di voice note yang baru
+  direkam, sebelum catatannya disimpan (belum ada fitur edit catatan yang
+  sudah tersimpan, jadi belum ada tempat untuk menempelkan hasil transkrip
+  voice note lama). Rekamannya sendiri (bukan cuma transkripnya) dikirim ke
+  Gemini untuk dianalisis — beda dari foto di Chat, rekaman voice note
+  memang sudah tersimpan di Storage terlepas dari fitur ini.
 - Chat gizi AI (opsional, lihat bagian 5 di atas) adalah obrolan bebas — bisa
   dipakai untuk ngobrol/tanya-tanya biasa, dan Gemini sendiri yang menentukan
   kapan suatu pesan (teks dan/atau foto) itu cerita soal makanan/minuman yang

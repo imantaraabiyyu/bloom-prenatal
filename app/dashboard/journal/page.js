@@ -17,6 +17,15 @@ function formatSeconds(s) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("Gagal membaca rekaman."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function sortEntries(a, b) {
   if (a.entry_date !== b.entry_date) return a.entry_date < b.entry_date ? 1 : -1;
   return a.created_at < b.created_at ? 1 : -1;
@@ -205,6 +214,83 @@ export default function JournalPage() {
     setIsRecording(false);
   }
 
+  // ---------------- voice note transcription ----------------
+  // Right after a recording stops, `promptDismissed` is unset — the pending
+  // item shows a "transkrip ini?" prompt rather than a passive button, so
+  // it's impossible to miss. Runs before the entry is saved — lets you
+  // review/edit the tidied text (or just the raw transcript) and drop it
+  // into the note field yourself, rather than silently rewriting your typing.
+  function dismissTranscribePrompt(idx) {
+    setPendingVoiceNotes((prev) => prev.map((v, i) => (i === idx ? { ...v, promptDismissed: true } : v)));
+  }
+
+  async function transcribePendingVoice(idx) {
+    const voice = pendingVoiceNotes[idx];
+    if (!voice) return;
+    setPendingVoiceNotes((prev) => prev.map((v, i) => (
+      i === idx ? { ...v, promptDismissed: true, transcribing: true, transcribeError: "", transcript: "", tidiedNote: "" } : v
+    )));
+
+    function applyProgress(patch) {
+      setPendingVoiceNotes((prev) => prev.map((v, i) => (i === idx ? { ...v, ...patch } : v)));
+    }
+
+    try {
+      const base64 = await blobToBase64(voice.blob);
+      const res = await fetch("/api/journal/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio: { base64, mimeType: voice.mimeType } }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Gagal mentranskrip.");
+      }
+
+      // Newline-delimited JSON events, same protocol as /api/nutrition-chat:
+      // {type:"progress", transcript, tidiedNote} as text fills in, then one
+      // {type:"done", result} or {type:"error", error}.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult = null;
+      let streamError = null;
+
+      function handleLine(line) {
+        if (!line.trim()) return;
+        let evt;
+        try { evt = JSON.parse(line); } catch { return; }
+        if (evt.type === "progress") applyProgress({ transcript: evt.transcript, tidiedNote: evt.tidiedNote });
+        else if (evt.type === "done") finalResult = evt.result;
+        else if (evt.type === "error") streamError = evt.error;
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        lines.forEach(handleLine);
+      }
+      if (buffer.trim()) handleLine(buffer);
+
+      if (streamError) throw new Error(streamError);
+      if (!finalResult) throw new Error("Gagal mentranskrip.");
+      applyProgress({ transcribing: false, transcript: finalResult.transcript, tidiedNote: finalResult.tidiedNote });
+    } catch (e) {
+      applyProgress({ transcribing: false, transcribeError: e.message || "Gagal mentranskrip." });
+    }
+  }
+
+  // Appends rather than replaces — you might already be typing your own note
+  // alongside the voice note, or combining transcripts from more than one.
+  function useTidiedNote(idx) {
+    const tidied = pendingVoiceNotes[idx]?.tidiedNote;
+    if (!tidied) return;
+    setNote((prev) => (prev.trim() ? `${prev.trim()}\n\n${tidied}` : tidied));
+  }
+
   // ---------------- save ----------------
   async function handleSave() {
     setError("");
@@ -388,19 +474,78 @@ export default function JournalPage() {
                 {pendingPhotos.map((p, i) => (
                   <div className="pending-item" key={`p${i}`}>
                     <img src={p.url} alt="" />
-                    <button type="button" onClick={() => removePending("photo", i)}>✕</button>
+                    <button type="button" className="pending-remove-btn" onClick={() => removePending("photo", i)}>✕</button>
                   </div>
                 ))}
                 {pendingVideos.map((v, i) => (
                   <div className="pending-item" key={`v${i}`}>
                     <video src={v.url} muted />
-                    <button type="button" onClick={() => removePending("video", i)}>✕</button>
+                    <button type="button" className="pending-remove-btn" onClick={() => removePending("video", i)}>✕</button>
                   </div>
                 ))}
                 {pendingVoiceNotes.map((v, i) => (
                   <div className="pending-item pending-voice" key={`a${i}`}>
-                    <audio controls src={v.url} />
-                    <button type="button" onClick={() => removePending("voice", i)}>✕</button>
+                    <div className="pending-voice-row">
+                      <audio controls src={v.url} />
+                      <button type="button" className="pending-remove-btn" onClick={() => removePending("voice", i)}>✕</button>
+                    </div>
+
+                    {/* Right after recording stops: an unmissable prompt, not a
+                        button sitting quietly among the others. */}
+                    {!v.promptDismissed && !v.transcribing && !v.tidiedNote && (
+                      <div className="transcribe-prompt">
+                        <p>Mau ditranskrip jadi draf jurnal?</p>
+                        <div className="transcribe-prompt-actions">
+                          <button type="button" className="transcribe-use-btn" onClick={() => transcribePendingVoice(i)}>
+                            Ya, transkrip
+                          </button>
+                          <button type="button" className="manual-form-cancel" onClick={() => dismissTranscribePrompt(i)}>
+                            Tidak, nanti saja
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Declined earlier, changed your mind — the button stays available. */}
+                    {v.promptDismissed && !v.transcribing && !v.tidiedNote && !v.transcribeError && (
+                      <button type="button" className="transcribe-btn" onClick={() => transcribePendingVoice(i)}>
+                        📝 Transkrip & rapikan jadi jurnal
+                      </button>
+                    )}
+
+                    {/* Streams in live — transcript fills in first, then the
+                        tidied draft right after (see streamTranscribeVoiceNote). */}
+                    {v.transcribing && (
+                      <div className="transcript-preview streaming">
+                        <p className="transcript-preview-label">Mentranskrip…</p>
+                        {v.tidiedNote ? (
+                          <p className="transcript-preview-text">{v.tidiedNote}<span className="chat-cursor" /></p>
+                        ) : (
+                          <p className="transcript-preview-text muted">{v.transcript}<span className="chat-cursor" /></p>
+                        )}
+                      </div>
+                    )}
+
+                    {v.transcribeError && (
+                      <div className="error-box">
+                        {v.transcribeError}{" "}
+                        <button type="button" className="retry-inline-btn" onClick={() => transcribePendingVoice(i)}>Coba lagi</button>
+                      </div>
+                    )}
+
+                    {!v.transcribing && v.tidiedNote && (
+                      <div className="transcript-preview">
+                        <p className="transcript-preview-label">Draf jurnal dari voice note ini:</p>
+                        <p className="transcript-preview-text">{v.tidiedNote}</p>
+                        <details className="transcript-raw">
+                          <summary>Lihat transkrip apa adanya</summary>
+                          <p>{v.transcript || "(tidak ada ucapan yang dikenali)"}</p>
+                        </details>
+                        <button type="button" className="transcribe-use-btn" onClick={() => useTidiedNote(i)}>
+                          Gunakan sebagai catatan
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

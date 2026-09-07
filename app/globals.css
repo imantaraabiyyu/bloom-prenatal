@@ -294,10 +294,33 @@ button, input { font-family: inherit; }
 .pending-attachments { display: flex; flex-wrap: wrap; gap: 10px; }
 .pending-item { position: relative; width: 92px; }
 .pending-item img, .pending-item video { width: 92px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(243,237,233,0.14); display: block; background: rgba(0,0,0,0.2); }
-.pending-item.pending-voice { width: auto; }
+.pending-item.pending-voice { width: auto; display: flex; flex-direction: column; gap: 8px; max-width: 320px; }
+.pending-voice-row { display: flex; align-items: center; }
 .pending-item.pending-voice audio { height: 36px; max-width: 240px; }
-.pending-item button { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(28,18,25,0.9); color: var(--text); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.pending-item button:hover { background: var(--rose); color: #2B1B2E; }
+/* explicit class instead of a blanket ".pending-item button" — the voice
+   card now holds more buttons (transcribe, use-as-note) that must NOT get
+   this same corner-badge treatment */
+.pending-remove-btn { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(28,18,25,0.9); color: var(--text); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.pending-remove-btn:hover { background: var(--rose); color: #2B1B2E; }
+
+/* ---------- Voice note transcription (Jurnal) ---------- */
+.transcribe-btn { align-self: flex-start; background: none; border: 1.5px dashed rgba(243,237,233,0.28); color: var(--lilac); font-size: 12px; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+.transcribe-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.transcribe-btn:disabled { opacity: .6; cursor: default; }
+.transcript-preview { background: rgba(0,0,0,0.18); border: 1px solid rgba(243,237,233,0.1); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.transcript-preview-label { margin: 0; font-size: 10.5px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .04em; }
+.transcript-preview-text { margin: 0; font-size: 13px; color: #e8dde5; line-height: 1.55; white-space: pre-wrap; }
+.transcript-raw { font-size: 11.5px; color: var(--text-faint); }
+.transcript-raw summary { cursor: pointer; }
+.transcript-raw p { margin: 6px 0 0; white-space: pre-wrap; line-height: 1.5; }
+.transcribe-use-btn { align-self: flex-start; background: var(--accent); color: #2B1B2E; border: none; font-weight: 600; font-size: 12px; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+.transcribe-use-btn:hover { filter: brightness(1.05); }
+/* the unmissable prompt right after a recording stops */
+.transcribe-prompt { background: rgba(227,182,94,0.08); border: 1px solid rgba(227,182,94,0.3); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.transcribe-prompt p { margin: 0; font-size: 13px; color: #e8dde5; }
+.transcribe-prompt-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.transcript-preview-text.muted { color: var(--text-dimmer); }
+.retry-inline-btn { background: none; border: none; color: inherit; text-decoration: underline; font-size: inherit; cursor: pointer; padding: 0; }
 
 .entry-attachments { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .entry-attachment { position: relative; }
