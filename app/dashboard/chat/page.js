@@ -163,8 +163,14 @@ export default function ChatPage() {
     setInput("");
     setPendingImage(null);
     setSending(true);
-    const typingId = `typing-${nextTypingId++}`;
-    setMessages((prev) => [...prev, { id: typingId, role: "assistant", typing: true }]);
+    // Local-only placeholder that grows as delta events arrive — replaced by
+    // the real (persisted) message once the stream finishes, same swap the
+    // old "typing" placeholder did, just with real text growing meanwhile.
+    const streamId = `stream-${nextTypingId++}`;
+    setMessages((prev) => [...prev, { id: streamId, role: "assistant", text: "", streaming: true }]);
+    function appendDelta(delta) {
+      setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, text: (m.text || "") + delta } : m)));
+    }
 
     try {
       const image = file ? await resizeImageForChat(file) : null;
@@ -173,25 +179,56 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text || null, image, history }),
       });
-      const data = await res.json();
-      setMessages((prev) => prev.filter((m) => m.id !== typingId));
 
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMessages((prev) => prev.filter((m) => m.id !== streamId));
         await saveMessage({ role: "assistant", text: `⚠ ${data.error || "Ada gangguan, coba lagi ya."}`, had_image: false });
         return;
       }
 
-      const result = data.result;
-      if (result.is_log && result.meal) {
+      // Newline-delimited JSON events: {type:"delta"|"done"|"error", ...}
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult = null;
+      let streamError = null;
+
+      function handleLine(line) {
+        if (!line.trim()) return;
+        let evt;
+        try { evt = JSON.parse(line); } catch { return; }
+        if (evt.type === "delta") appendDelta(evt.text);
+        else if (evt.type === "done") finalResult = evt.result;
+        else if (evt.type === "error") streamError = evt.error;
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        lines.forEach(handleLine);
+      }
+      if (buffer.trim()) handleLine(buffer);
+
+      setMessages((prev) => prev.filter((m) => m.id !== streamId));
+
+      if (streamError) {
+        await saveMessage({ role: "assistant", text: `⚠ ${streamError}`, had_image: false });
+      } else if (!finalResult) {
+        await saveMessage({ role: "assistant", text: "⚠ Ada gangguan, coba lagi ya.", had_image: false });
+      } else if (finalResult.is_log && finalResult.meal) {
         // Saved as analysis only — the "Simpan ke Dashboard" button (below)
         // is what actually inserts it into `meals`, so nothing's logged
         // until the user confirms it looks right.
-        await saveMessage({ role: "assistant", had_image: false, analysis: result });
+        await saveMessage({ role: "assistant", had_image: false, analysis: finalResult });
       } else {
-        await saveMessage({ role: "assistant", had_image: false, text: result.reply || "…" });
+        await saveMessage({ role: "assistant", had_image: false, text: finalResult.reply || "…" });
       }
     } catch (e) {
-      setMessages((prev) => prev.filter((m) => m.id !== typingId));
+      setMessages((prev) => prev.filter((m) => m.id !== streamId));
       await saveMessage({ role: "assistant", text: "⚠ Ada gangguan, coba kirim ulang beberapa saat lagi.", had_image: false });
     } finally {
       setSending(false);
@@ -237,7 +274,7 @@ export default function ChatPage() {
           <Link href="/dashboard" className="nav-link">Dashboard</Link>
           <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
           <Link href="/dashboard/chat" className="nav-link active">Chat</Link>
-          <Link href="/dashboard/baby-names" className="nav-link">Nama Bayi</Link>
+          <Link href="/dashboard/profile" className="nav-link">Profil</Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -266,8 +303,8 @@ export default function ChatPage() {
             {messages.map((m) => (
               <div className={`chat-msg-row ${m.role}`} key={m.id}>
                 <div className="chat-bubble">
-                  {m.typing ? (
-                    <span className="chat-typing">mengetik…</span>
+                  {m.streaming ? (
+                    <span>{m.text}<span className="chat-cursor" /></span>
                   ) : (
                     <>
                       {m.imageUrl && <img className="chat-bubble-image" src={m.imageUrl} alt="" />}
@@ -307,10 +344,19 @@ export default function ChatPage() {
               </div>
             )}
             <div className="chat-input-row">
-              <label className="attach-btn" title="Lampirkan foto">
-                🖼️ Foto
-                <input type="file" accept="image/*" onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
-              </label>
+              <div className="chat-attach-group">
+                <label className="attach-btn" title="Ambil foto langsung (kamera)">
+                  📷 Kamera
+                  <input
+                    type="file" accept="image/*" capture="environment"
+                    onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }}
+                  />
+                </label>
+                <label className="attach-btn" title="Unggah dari galeri/file">
+                  🖼️ Galeri
+                  <input type="file" accept="image/*" onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
+                </label>
+              </div>
               <textarea
                 rows={1}
                 placeholder="Tulis pesan, atau lampirkan/tempel/seret foto makanan, lalu kirim…"
