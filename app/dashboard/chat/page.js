@@ -69,7 +69,9 @@ export default function ChatPage() {
   const [pendingImage, setPendingImage] = useState(null); // { file, url }
   const [sending, setSending] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false); // tap-to-toggle on mobile; CSS :hover also reveals it on desktop
   const threadEndRef = useRef(null);
+  const attachMenuRef = useRef(null);
 
   useEffect(() => {
     if (!supabase) { router.replace("/login"); return; }
@@ -98,6 +100,21 @@ export default function ChatPage() {
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Closes the attach menu on an outside tap/click — needed since on mobile
+  // it's opened by tapping (no hover state to rely on for dismissing it).
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    function handleOutside(e) {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target)) setAttachMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("touchstart", handleOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("touchstart", handleOutside);
+    };
+  }, [attachMenuOpen]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -351,18 +368,26 @@ export default function ChatPage() {
               </div>
             )}
             <div className="chat-input-row">
-              <div className="chat-attach-group">
-                <label className="attach-btn" title="Ambil foto langsung (kamera)">
-                  📷 Kamera
-                  <input
-                    type="file" accept="image/*" capture="environment"
-                    onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }}
-                  />
-                </label>
-                <label className="attach-btn" title="Unggah dari galeri/file">
-                  🖼️ Galeri
-                  <input type="file" accept="image/*" onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
-                </label>
+              <div className={`attach-menu ${attachMenuOpen ? "open" : ""}`} ref={attachMenuRef}>
+                <button
+                  type="button" className="attach-btn attach-menu-trigger" title="Lampirkan foto"
+                  onClick={() => setAttachMenuOpen((o) => !o)}
+                >
+                  📎 Foto
+                </button>
+                <div className="attach-menu-list">
+                  <label className="attach-menu-item" onClick={() => setAttachMenuOpen(false)}>
+                    📷 Kamera
+                    <input
+                      type="file" accept="image/*" capture="environment"
+                      onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }}
+                    />
+                  </label>
+                  <label className="attach-menu-item" onClick={() => setAttachMenuOpen(false)}>
+                    🖼️ Galeri
+                    <input type="file" accept="image/*" onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
+                  </label>
+                </div>
               </div>
               <textarea
                 rows={1}

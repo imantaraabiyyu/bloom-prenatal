@@ -181,14 +181,18 @@ supabase/
   mulai menstruasi terakhir sebelum hamil) yang diisi di tab **Profil**. Kalau
   yang kamu punya cuma HPL (perkiraan lahir dari dokter/USG), pakai toggle
   "Saya tahu HPL" — Bloom membalikkannya jadi HPHT otomatis (aturan Naegele:
-  HPL = HPHT + 280 hari), keduanya saling bisa dihitung dari yang lain. Setiap
-  kali tanggal ini disimpan, `profiles.trimester` ikut disetel otomatis sesuai
-  usia kehamilan saat itu — tapi tetap bisa di-override manual lewat trimester
-  picker di Dashboard kalau perkiraan dokter berbeda. Cuma perkiraan kalender,
-  bukan pengganti perhitungan USG dokter.
-- Panel utama dashboard punya "Lompat ke tanggal lain" di samping navigasi
-  hari — jadi kamu bisa mengisi data untuk tanggal apa pun di masa lalu
-  (backdate), bukan cuma tanggal yang sudah ada datanya.
+  HPL = HPHT + 280 hari), keduanya saling bisa dihitung dari yang lain. Cuma
+  perkiraan kalender, bukan pengganti perhitungan USG dokter.
+- Trimester di Dashboard bukan lagi pilihan manual — dihitung otomatis dari
+  HPHT + tanggal yang sedang dilihat (lewat kalender di panel cincin gizi),
+  jadi membuka tanggal di masa lalu menampilkan trimester (dan target gizi)
+  sesuai usia kehamilan saat itu, bukan selalu trimester hari ini. Sebelum
+  HPHT/HPL diisi, ditampilkan sebagai Trimester 1 sementara, dengan info
+  ajakan mengisinya di tab Profil.
+- Panel cincin gizi di dashboard punya kalender kecil (bukan lagi dropdown
+  tanggal) — hari yang sudah ada datanya ditandai hijau, klik tanggal mana
+  pun untuk mengisi data lama (backdate), dan tombol "Hari ini" selalu ada
+  untuk kembali cepat.
 - Daftar calon nama bayi (`baby_names`, di tab **Profil**) murni untuk
   brainstorming pribadi — belum ada fitur berbagi/kolaborasi lintas akun (mis.
   dengan pasangan), jadi kalau berdua-duaan mencatat, sepakati dulu satu akun
