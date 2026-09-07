@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import ConfirmButton from "@/components/ConfirmButton";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
@@ -701,7 +702,7 @@ export default function Dashboard() {
                     <div className="vitamin-name">{v.name}</div>
                     <div className="vitamin-detail">{detailParts.join(" · ") || "tanpa data gizi"}</div>
                   </div>
-                  <button className="vitamin-remove" title="Hapus vitamin ini" onClick={() => removeVitamin(v.id)}>✕</button>
+                  <ConfirmButton className="vitamin-remove" title="Hapus vitamin ini" onConfirm={() => removeVitamin(v.id)}>✕</ConfirmButton>
                 </div>
               );
             })
@@ -765,7 +766,7 @@ export default function Dashboard() {
                       </div>
                       <div className="meal-list-detail">{detailParts.join(" · ") || "tanpa data gizi"}</div>
                     </div>
-                    <button className="meal-list-remove" title="Hapus menu ini" onClick={() => handleDeleteMeal(m.id)}>✕</button>
+                    <ConfirmButton className="meal-list-remove" title="Hapus menu ini" onConfirm={() => handleDeleteMeal(m.id)}>✕</ConfirmButton>
                   </div>
                 );
               })

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import ConfirmButton from "@/components/ConfirmButton";
 import { NUTRIENT_ORDER, NUTRIENT_META, todayISO } from "@/lib/nutrition";
 
 // Downscales a photo client-side before it ever leaves the browser — phone
@@ -256,7 +257,6 @@ export default function ChatPage() {
   }
 
   async function clearHistory() {
-    if (typeof window !== "undefined" && !window.confirm("Hapus semua riwayat chat? Menu yang sudah tersimpan ke Dashboard tidak ikut terhapus.")) return;
     setMessages([]);
     await supabase.from("chat_messages").delete().eq("user_id", user.id);
   }
@@ -264,7 +264,7 @@ export default function ChatPage() {
   if (loading) return <div className="center-loading">Memuat data…</div>;
 
   return (
-    <div className="wrap">
+    <div className="wrap chat-page">
       <div className="topbar">
         <div className="topbar-left">
           <div className="avatar">{(user?.email || "?").charAt(0).toUpperCase()}</div>
@@ -294,7 +294,14 @@ export default function ChatPage() {
           onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
         >
           <div className="chat-toolbar">
-            {messages.length > 0 && <button className="chat-clear-btn" onClick={clearHistory}>Hapus riwayat chat</button>}
+            {messages.length > 0 && (
+              <ConfirmButton
+                className="chat-clear-btn" onConfirm={clearHistory}
+                note="Menu yang sudah tersimpan ke Dashboard tidak ikut terhapus."
+              >
+                Hapus riwayat chat
+              </ConfirmButton>
+            )}
           </div>
           <div className="chat-thread">
             {messages.length === 0 && (
@@ -322,7 +329,7 @@ export default function ChatPage() {
                       {m.savedMealId && !m.undone && (
                         <div className="chat-bubble-actions">
                           <span className="chat-saved-tag">✓ Tersimpan ke menu hari ini</span>
-                          <button type="button" onClick={() => undoSavedMeal(m.id, m.savedMealId)}>Hapus</button>
+                          <ConfirmButton onConfirm={() => undoSavedMeal(m.id, m.savedMealId)}>Hapus</ConfirmButton>
                         </div>
                       )}
                       {m.undone && <div className="chat-bubble-actions"><span className="chat-saved-tag">Dihapus dari menu</span></div>}

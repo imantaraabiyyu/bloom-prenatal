@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import ConfirmButton from "@/components/ConfirmButton";
 import { todayISO } from "@/lib/nutrition";
 import {
   MOODS, moodMeta, ATTACHMENT_KINDS,
@@ -30,6 +31,7 @@ export default function JournalPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
+  const [confirmingAttachmentId, setConfirmingAttachmentId] = useState(null); // click-again-to-confirm delete
 
   const [entryDate, setEntryDate] = useState(todayISO());
   const [mood, setMood] = useState(null);
@@ -270,6 +272,23 @@ export default function JournalPage() {
     await supabase.from("journal_attachments").delete().eq("id", attachment.id);
   }
 
+  // This remove button sits absolutely-positioned over the thumbnail, so it
+  // can't swap to ConfirmButton's inline "[Ya, hapus] [Batal]" pair the way
+  // every other delete button does (there's no room, and it'd fight the
+  // overlay positioning) — same click-again-to-confirm intent, just done as
+  // an in-place icon swap with an auto-revert instead.
+  function handleAttachmentRemoveClick(entryId, attachment) {
+    if (confirmingAttachmentId === attachment.id) {
+      setConfirmingAttachmentId(null);
+      handleDeleteAttachment(entryId, attachment);
+    } else {
+      setConfirmingAttachmentId(attachment.id);
+      setTimeout(() => {
+        setConfirmingAttachmentId((cur) => (cur === attachment.id ? null : cur));
+      }, 3000);
+    }
+  }
+
   if (loading) return <div className="center-loading">Memuat data…</div>;
 
   return (
@@ -407,7 +426,7 @@ export default function JournalPage() {
                   <div className="journal-entry-header">
                     <span className="journal-entry-date">{e.entry_date}</span>
                     {m && <span className="journal-entry-mood">{m.emoji} {m.label}</span>}
-                    <button className="journal-entry-remove" title="Hapus catatan ini" onClick={() => handleDelete(e)}>✕</button>
+                    <ConfirmButton className="journal-entry-remove" title="Hapus catatan ini" onConfirm={() => handleDelete(e)}>✕</ConfirmButton>
                   </div>
                   {e.note && <p className="journal-entry-note">{e.note}</p>}
                   {e.attachments && e.attachments.length > 0 && (
@@ -424,9 +443,10 @@ export default function JournalPage() {
                             <div className="entry-attachment-broken">⚠ tidak bisa dimuat</div>
                           )}
                           <button
-                            className="entry-attachment-remove" title="Hapus lampiran ini"
-                            onClick={() => handleDeleteAttachment(e.id, a)}
-                          >✕</button>
+                            className={`entry-attachment-remove ${confirmingAttachmentId === a.id ? "confirming" : ""}`}
+                            title={confirmingAttachmentId === a.id ? "Klik sekali lagi untuk menghapus" : "Hapus lampiran ini"}
+                            onClick={() => handleAttachmentRemoveClick(e.id, a)}
+                          >{confirmingAttachmentId === a.id ? "✓" : "✕"}</button>
                         </div>
                       ))}
                     </div>
