@@ -174,7 +174,7 @@ export default function JournalPage() {
     if (isRecording && recordSeconds >= MAX_RECORDING_SECONDS) {
       const setAttachErr = recordingTarget === "edit" ? setEditAttachError : setAttachError;
       stopRecording();
-      setAttachErr(`⚠ Rekaman dihentikan otomatis di batas ${Math.round(MAX_RECORDING_SECONDS / 60)} menit.`);
+      setAttachErr(`Rekaman dihentikan otomatis di batas ${Math.round(MAX_RECORDING_SECONDS / 60)} menit.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordSeconds, isRecording]);
@@ -226,7 +226,7 @@ export default function JournalPage() {
     if (wrongType.length > 0) problems.push(`${wrongType.length} file bukan ${ATTACHMENT_KINDS[kind].label.toLowerCase()} yang valid`);
     if (oversized.length > 0) problems.push(`${oversized.length} file lebih besar dari ${MAX_ATTACHMENT_MB}MB`);
     if (overCap > 0) problems.push(`${overCap} file dilewati (maks ${MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan)`);
-    if (problems.length > 0) setAttachErr(`⚠ ${problems.join(" · ")}.`);
+    if (problems.length > 0) setAttachErr(`${problems.join(" · ")}.`);
   }
 
   function removePending(target, kind, idx) {
@@ -250,15 +250,15 @@ export default function JournalPage() {
     const setAttachErr = target === "edit" ? setEditAttachError : setAttachError;
     setAttachErr("");
     if (isRecording) {
-      setAttachErr("⚠ Sedang merekam di catatan lain — selesaikan/hentikan dulu.");
+      setAttachErr("Sedang merekam di catatan lain — selesaikan/hentikan dulu.");
       return;
     }
     if (pendingCount(target) >= MAX_ATTACHMENTS_PER_ENTRY) {
-      setAttachErr(`⚠ Maksimal ${MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.`);
+      setAttachErr(`Maksimal ${MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.`);
       return;
     }
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setAttachErr("⚠ Browser ini tidak mendukung rekam suara.");
+      setAttachErr("Browser ini tidak mendukung rekam suara.");
       return;
     }
     try {
@@ -274,7 +274,7 @@ export default function JournalPage() {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         if (blob.size > MAX_ATTACHMENT_BYTES) {
-          setAttachErr(`⚠ Rekaman terlalu besar (lebih dari ${MAX_ATTACHMENT_MB}MB) — coba rekam lebih singkat.`);
+          setAttachErr(`Rekaman terlalu besar (lebih dari ${MAX_ATTACHMENT_MB}MB) — coba rekam lebih singkat.`);
           return;
         }
         const url = URL.createObjectURL(blob);
@@ -288,7 +288,7 @@ export default function JournalPage() {
       setRecordingTarget(target);
       recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
     } catch (e) {
-      setAttachErr("⚠ Tidak bisa akses microphone. Izinkan akses mic dulu di pengaturan browser.");
+      setAttachErr("Tidak bisa akses microphone. Izinkan akses mic dulu di pengaturan browser.");
     }
   }
 
@@ -404,8 +404,8 @@ export default function JournalPage() {
     setError("");
     const trimmed = note.trim();
     const hasAttachments = pendingPhotos.length > 0 || pendingVideos.length > 0 || pendingVoiceNotes.length > 0;
-    if (!trimmed && !hasAttachments) { setError("⚠ Tulis catatan atau lampirkan foto/video/voice note dulu."); return; }
-    if (!entryDate) { setError("⚠ Pilih tanggal untuk catatan ini."); return; }
+    if (!trimmed && !hasAttachments) { setError("Tulis catatan atau lampirkan foto/video/voice note dulu."); return; }
+    if (!entryDate) { setError("Pilih tanggal untuk catatan ini."); return; }
 
     setSaving(true);
     const { data: entry, error: entryErr } = await supabase
@@ -414,7 +414,7 @@ export default function JournalPage() {
       .select()
       .maybeSingle();
 
-    if (entryErr) { setSaving(false); setError("⚠ " + entryErr.message); return; }
+    if (entryErr) { setSaving(false); setError(entryErr.message); return; }
 
     const savedAttachments = [];
     let failedCount = 0;
@@ -439,7 +439,7 @@ export default function JournalPage() {
     setPendingVideos([]);
     setPendingVoiceNotes([]);
 
-    if (failedCount > 0) setError(`⚠ Catatan tersimpan, tapi ${failedCount} lampiran gagal diunggah.`);
+    if (failedCount > 0) setError(`Catatan tersimpan, tapi ${failedCount} lampiran gagal diunggah.`);
   }
 
   async function handleDelete(entry) {
@@ -478,8 +478,8 @@ export default function JournalPage() {
     const trimmed = editNote.trim();
     const hasAttachments = (entry.attachments || []).length > 0
       || editPendingPhotos.length > 0 || editPendingVideos.length > 0 || editPendingVoiceNotes.length > 0;
-    if (!trimmed && !hasAttachments) { setEditError("⚠ Tulis catatan dulu."); return; }
-    if (!editDate) { setEditError("⚠ Pilih tanggal untuk catatan ini."); return; }
+    if (!trimmed && !hasAttachments) { setEditError("Tulis catatan dulu."); return; }
+    if (!editDate) { setEditError("Pilih tanggal untuk catatan ini."); return; }
 
     setEditSaving(true);
     const { data, error: updateErr } = await supabase
@@ -488,7 +488,7 @@ export default function JournalPage() {
       .eq("id", entry.id)
       .select()
       .maybeSingle();
-    if (updateErr) { setEditSaving(false); setEditError("⚠ " + updateErr.message); return; }
+    if (updateErr) { setEditSaving(false); setEditError(updateErr.message); return; }
 
     // Same upload-then-collect shape as handleSave, just against the
     // entry's already-existing id instead of a fresh insert.
@@ -519,7 +519,7 @@ export default function JournalPage() {
     // entry/note already saved either way) so the warning stays visible —
     // editError renders inside that form, which unmounts once
     // editingEntryId clears.
-    if (failedCount > 0) setEditError(`⚠ Perubahan tersimpan, tapi ${failedCount} lampiran gagal diunggah.`);
+    if (failedCount > 0) setEditError(`Perubahan tersimpan, tapi ${failedCount} lampiran gagal diunggah.`);
     else setEditingEntryId(null);
   }
 
@@ -731,7 +731,7 @@ export default function JournalPage() {
                   onClick={() => setMood((prev) => (prev === m.key ? null : m.key))}
                   title={m.label}
                 >
-                  <m.icon size={15} /> {m.label}
+                  <span>{m.emoji}</span> {m.label}
                 </button>
               ))}
             </div>
@@ -791,7 +791,7 @@ export default function JournalPage() {
                             key={mm.key} type="button" className={`mood-btn ${editMood === mm.key ? "active" : ""}`}
                             onClick={() => setEditMood((prev) => (prev === mm.key ? null : mm.key))} title={mm.label}
                           >
-                            <mm.icon size={15} /> {mm.label}
+                            <span>{mm.emoji}</span> {mm.label}
                           </button>
                         ))}
                       </div>
@@ -822,7 +822,7 @@ export default function JournalPage() {
                               {a.kind === "voice" && <audio src={a.url} controls />}
                             </>
                           ) : (
-                            <div className="entry-attachment-broken">⚠ tidak bisa dimuat</div>
+                            <div className="entry-attachment-broken"><AlertTriangle size={13} /> tidak bisa dimuat</div>
                           )}
                           <button
                             className={`entry-attachment-remove ${confirmingAttachmentId === a.id ? "confirming" : ""}`}
