@@ -9,7 +9,7 @@ import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
   parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
-  statusForPct, slugifyNutrientLabel, mergeExtraNutrients,
+  statusForPct, mergeExtraNutrients, buildExtraNutrientsMap,
 } from "@/lib/nutrition";
 import { trimesterForDate } from "@/lib/pregnancy";
 
@@ -359,14 +359,7 @@ export default function Dashboard() {
       const v = parseFloat(vitFormValues[n]);
       row[n] = isNaN(v) ? 0 : v;
     });
-    const extraNutrients = {};
-    vitFormExtra.forEach((r) => {
-      const label = r.label.trim();
-      const value = parseFloat(r.value);
-      if (!label || isNaN(value)) return; // incomplete rows are silently dropped, not saved as zero
-      extraNutrients[slugifyNutrientLabel(label)] = { label, unit: r.unit.trim(), value };
-    });
-    row.extra_nutrients = extraNutrients;
+    row.extra_nutrients = buildExtraNutrientsMap(vitFormExtra);
     const { data, error } = await supabase.from("vitamins").insert(row).select().maybeSingle();
     setVitFormSaving(false);
     if (error) { setVitFormError("⚠ " + error.message); return; }
