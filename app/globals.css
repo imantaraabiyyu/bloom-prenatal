@@ -77,8 +77,17 @@ button, input { font-family: inherit; }
 .status-low { background: rgba(199,123,99,0.18); color: var(--rose); }
 
 /* ---------- Grid / panels ---------- */
-.bloom-grid { max-width: 920px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 22px; }
-@media (min-width: 820px) { .bloom-grid { grid-template-columns: 340px 1fr; } }
+/* minmax(0, 1fr), not a bare 1fr -- a bare 1fr track's automatic minimum
+   size is "auto" (its content's min-content size), so wide content deep
+   inside a panel (the trend chart's SVG, the history table) would force
+   this track -- and the whole page's layout width -- to grow to fit it
+   instead of the descendant's own overflow-x:auto ever kicking in. On a
+   mobile viewport that shows up as the *entire page* zooming out to fit,
+   not just that one panel. minmax(0, ...) is the standard fix -- lets the
+   track shrink to the available width and pushes the overflow handling
+   back down to wherever it's actually supposed to happen. */
+.bloom-grid { max-width: 920px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+@media (min-width: 820px) { .bloom-grid { grid-template-columns: 340px minmax(0, 1fr); } }
 .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 18px; padding: 22px; }
 .full { grid-column: 1 / -1; }
 .panel h2, .panel h3 { font-family: 'Fraunces', serif; font-size: 18px; margin: 0 0 14px; font-weight: 500; }
@@ -136,7 +145,7 @@ button, input { font-family: inherit; }
 .water-widget-label { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13.5px; flex-wrap: wrap; }
 .water-widget-value { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-dimmer); }
 .water-bar-track { height: 18px; border-radius: 100px; background: rgba(243,237,233,0.08); overflow: hidden; }
-.water-bar-fill { height: 100%; border-radius: 100px; transition: width .3s ease; }
+.water-bar-fill { height: 100%; border-radius: 100px; transition: width .3s ease; position: relative; }
 .water-quick-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .water-btn { flex: 1 1 72px; min-width: 72px; padding: 12px 6px; border-radius: 10px; border: 1px solid rgba(111,184,196,0.35); background: rgba(111,184,196,0.08); color: #cdeef2; font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: 'IBM Plex Mono', monospace; }
 .water-btn:hover:not(:disabled) { border-color: #6FB8C4; background: rgba(111,184,196,0.18); }
@@ -245,9 +254,24 @@ button, input { font-family: inherit; }
 .nutrient-row:last-child { border-bottom: none; }
 .nutrient-name { font-size: 13px; color: #e8dde5; }
 .nutrient-bar-track { height: 8px; border-radius: 100px; background: rgba(243,237,233,0.08); overflow: hidden; }
-.nutrient-bar-fill { height: 100%; border-radius: 100px; transition: width .4s ease; }
+.nutrient-bar-fill { height: 100%; border-radius: 100px; transition: width .4s ease; position: relative; }
 .nutrient-value { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; text-align: right; color: var(--text-dim); }
 .toggle-more { margin-top: 10px; background: none; border: none; color: var(--lilac); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+
+/* Over-100%-of-target marker -- same idea as the rings' own "frac > 1.02"
+   dot (this page's rings-svg block) just re-expressed for an HTML bar
+   instead of an SVG circle: the fill's own color/width (already capped at
+   100%, see the Math.min(...,100) callers in page.js) doesn't change,
+   this only adds a small dot at the fill's right edge so "at target" and
+   "well over target" don't look identical. Sits inside the track's own
+   overflow:hidden, not poking past it. .hist-bar-fill doesn't get this --
+   its value is an average of already-100-capped nutrients, so it can
+   never actually be over 100. */
+.nutrient-bar-fill.over::after, .water-bar-fill.over::after {
+  content: ""; position: absolute; top: 50%; right: 2px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--text); transform: translateY(-50%);
+}
 
 /* ---------- Trend ---------- */
 .trend-note { font-size: 12px; color: var(--text-dimmer); margin: 0 0 14px; }

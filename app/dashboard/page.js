@@ -773,7 +773,7 @@ export default function Dashboard() {
                 <span className="water-widget-value">{Math.round(waterTotal)}/{waterTarget}ml · {Math.round(waterPct)}%</span>
               </div>
               <div className="water-bar-track">
-                <div className="water-bar-fill" style={{ width: `${Math.min(waterPct, 100)}%`, background: waterStatus.color }} />
+                <div className={`water-bar-fill${waterPct > 102 ? " over" : ""}`} style={{ width: `${Math.min(waterPct, 100)}%`, background: waterStatus.color }} />
               </div>
               <div className="water-quick-row">
                 {[100, 200, 250, 500].map((ml) => (
@@ -827,7 +827,7 @@ export default function Dashboard() {
               return (
                 <div className="nutrient-row" key={key}>
                   <span className="nutrient-name">{meta.label}</span>
-                  <div className="nutrient-bar-track"><div className="nutrient-bar-fill" style={{ width: `${Math.min(pct, 100)}%`, background: meta.color }} /></div>
+                  <div className="nutrient-bar-track"><div className={`nutrient-bar-fill${pct > 102 ? " over" : ""}`} style={{ width: `${Math.min(pct, 100)}%`, background: meta.color }} /></div>
                   <span className="nutrient-value">{Math.round(value)}/{target}{meta.unit} · {Math.round(pct)}%</span>
                 </div>
               );
