@@ -4,6 +4,6 @@
     { "path": "/api/cron/reminders?kind=lunch", "schedule": "0 5 * * *" },
     { "path": "/api/cron/reminders?kind=dinner", "schedule": "0 12 * * *" },
     { "path": "/api/cron/reminders?kind=night", "schedule": "0 14 * * *" },
-    { "path": "/api/cron/reminders?kind=night", "schedule": "5 15 * * *" }
+    { "path": "/api/cron/reminders?kind=night", "schedule": "18 15 * * *" }
   ]
 }
