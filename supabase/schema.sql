@@ -23,6 +23,10 @@ create table if not exists public.profiles (
 -- ini di lib/pregnancy.js, tidak disimpan terpisah (sama seperti target/status
 -- gizi yang selalu dihitung, bukan disimpan).
 alter table public.profiles add column if not exists hpht date;
+-- Nama ibu — dipakai untuk menyapa secara personal di notifikasi Web Push
+-- (lihat app/api/cron/reminders/route.js), bukan cuma kosmetik di halaman
+-- Profil. Boleh kosong (fallback ke sapaan generik di lib/reminderLogic.js).
+alter table public.profiles add column if not exists name text;
 
 -- 2) Menu makan (riwayat harian)
 create table if not exists public.meals (
