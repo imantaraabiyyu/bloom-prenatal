@@ -77,6 +77,61 @@ Tanpa `GEMINI_API_KEY` diisi, tab Chat dan tombol transkrip di Jurnal tetap
 muncul tapi akan gagal dengan pesan error yang jelas — fitur lain di Bloom
 tidak terpengaruh.
 
+## 6. (Opsional) Aktifkan notifikasi push (pengingat menu/vitamin)
+
+Bloom bisa kirim 4 pengingat lewat Web Push tiap hari (jam WIB): **07:00**
+pagi (sapaan + semangat/fakta kehamilan), **12:00** siang (ajakan makan siang
++ fakta gizi), **19:00** malam (cuma kalau menu atau vitamin hari itu belum
+dicatat), dan **21:30** menjelang tidur (pengingat istirahat + afirmasi).
+Diaktifkan per pengguna lewat tombol di tab **Profil**.
+
+Ini murni web push bawaan browser (VAPID) — bukan lewat layanan pihak ketiga
+(OneSignal dkk), jadi tidak ada data yang keluar ke server siapa pun selain
+Supabase & Google (buat kalimat variasinya lewat Gemini, opsional juga).
+
+**Batasan platform (bukan bug):** di iPhone/iPad, notifikasi cuma muncul kalau
+Bloom sudah ditambahkan ke Layar Utama dulu (Safari → tombol Share → **Add to
+Home Screen**), dan minimal iOS 16.4. Ini batasan Apple sendiri, bukan
+sesuatu yang bisa dilewati dari kode. Di Android/Chrome & desktop, langsung
+jalan tanpa langkah tambahan itu.
+
+1. **service_role key** — di dashboard Supabase, buka **Project Settings →
+   API**, salin nilai di bagian **service_role secret** (BEDA dari anon key
+   yang sudah dipakai di langkah 3 — ini bisa baca lintas pengguna, cuma
+   dipakai server-side oleh cron, jangan pernah ditaruh di kode yang jalan di
+   browser).
+2. **VAPID keys + CRON_SECRET** — sudah digenerate sekali dan ditaruh di
+   `.env.local` kamu; salin nilai yang sama ke Vercel → Project Settings →
+   Environment Variables. Kalau mau generate ulang (rotasi), jalankan:
+   ```
+   node -e "console.log(require('web-push').generateVAPIDKeys())"
+   ```
+3. Tambahkan semua variabel ini ke `.env.local` (lokal) **dan** Vercel
+   (produksi):
+   ```
+   SUPABASE_SERVICE_ROLE_KEY=...         # dari langkah 1
+   NEXT_PUBLIC_VAPID_PUBLIC_KEY=...      # dari langkah 2
+   VAPID_PRIVATE_KEY=...                 # dari langkah 2
+   VAPID_SUBJECT=https://domain-app-kamu.vercel.app   # URL app kamu, bukan email pribadi
+   CRON_SECRET=...                       # dari langkah 2 -- token acak, lindungi URL cron
+   ```
+4. Kalau belum, jalankan ulang `supabase/schema.sql` (lihat langkah 2 di
+   bagian atas) — bagian tambahannya (`push_subscriptions`, kolom
+   `profiles.name`) aman dijalankan ulang.
+5. Deploy ke Vercel (lihat bagian **Deploy ke Vercel** di bawah) — jadwal
+   crons di `vercel.json` otomatis aktif begitu project live.
+
+**Cek batas plan Vercel-mu:** ada 4 cron job terpisah di `vercel.json` (satu
+per jam pengingat). Plan gratis (Hobby) Vercel membatasi jumlah cron job per
+project dan frekuensinya — angka pastinya bisa berubah dari waktu ke waktu,
+jadi cek dulu di dashboard Vercel-mu sebelum deploy. Kalau 4 tidak muat di
+plan-mu, pilihannya: gabung beberapa slot jadi satu jadwal, atau upgrade ke
+Pro.
+
+Tanpa `GEMINI_API_KEY` diisi, notifikasinya tetap terkirim — kalimat
+tambahannya jatuh ke daftar kalimat afirmasi/fakta statis di
+`lib/reminderLogic.js` alih-alih hasil generate Gemini.
+
 ## Coba di komputer sendiri dulu (opsional)
 
 ```
@@ -123,33 +178,71 @@ app/
                                transkrip AI dari voice note sebelum catatan disimpan)
   dashboard/chat/page.js  → chat gizi AI (kirim foto makanan, dapat analisis + insight,
                              riwayat chat tersimpan, "Simpan ke Dashboard" per hasil analisis)
-  dashboard/profile/page.js → profil kehamilan: usia kehamilan/HPL dari HPHT, dan daftar
-                               calon nama bayi (favorit, gender, catatan/arti)
+  dashboard/profile/page.js → profil kehamilan: nama, usia kehamilan/HPL dari HPHT, daftar
+                               calon nama bayi (favorit, gender, catatan/arti), dan panel
+                               notifikasi push
   api/nutrition-chat/route.js → proxy terautentikasi ke Gemini API buat chat, dialirkan
                                  sebagai newline-delimited JSON (balasan Bloom muncul
                                  progresif) — tidak menyentuh database, client yang
                                  menyimpan hasilnya ke `meals` sendiri
   api/journal/transcribe/route.js → proxy terautentikasi ke Gemini API buat transkrip +
                                      merapikan voice note jurnal (juga tidak menyentuh database)
+  api/push/subscribe/route.js → simpan/hapus langganan Web Push milik pengguna sendiri
+                                 (RLS biasa, bukan service role)
+  api/cron/reminders/route.js → pengirim 4 pengingat harian (dipicu oleh vercel.json's
+                                 crons, dilindungi CRON_SECRET) — satu route, dibedakan
+                                 lewat query ?kind=morning|lunch|dinner|night
   globals.css             → tema visual (dark plum)
 components/
   ConfirmButton.js       → tombol hapus dengan konfirmasi inline "[Ya, hapus] [Batal]"
                             (dipakai semua tombol ✕ hapus di seluruh app, ganti native confirm())
+  ServiceWorkerRegister.js → daftarkan public/sw.js sekali saat app dimuat (dirender dari
+                              app/layout.js)
 lib/
   supabaseClient.js      → koneksi ke Supabase dari browser (anon key)
   supabaseServer.js      → koneksi ke Supabase dari server, baca sesi login dari cookie
                             (bukan service role — cuma buat mengecek "siapa yang chat/transkrip")
+  supabaseAdmin.js       → koneksi service-role (bypass RLS) -- CUMA dipakai
+                            api/cron/reminders/route.js, jangan diimpor dari kode client
   nutrition.js           → target gizi per trimester, parser CSV, dll
   pregnancy.js           → usia kehamilan/HPL dari HPHT (Naegele's rule), dihitung bukan disimpan
   journal.js             → daftar mood + konstanta lampiran jurnal (limit ukuran/jumlah file)
-  gemini.js              → semua panggilan ke Gemini API: chat (streaming + parser JSON
-                            parsial) dan transkrip voice note jurnal
+  gemini.js              → semua panggilan ke Gemini API: chat, transkrip voice note jurnal,
+                            dan kalimat variasi pengingat push (nudge/fakta gizi)
+  push.js                → helper client-side: minta izin notifikasi, subscribe/unsubscribe
+                            PushManager
+  pushSender.js          → wrapper web-push (server-only) -- setup VAPID + kirim notifikasi
+  reminderLogic.js       → logika murni pengingat push (siapa yang belum catat apa, susun
+                            isi pesan, bank kalimat fallback) -- tanpa I/O, gampang di-test
 supabase/
   schema.sql              → skema tabel + storage bucket + Row Level Security
+public/
+  manifest.json           → PWA manifest (nama, ikon, display standalone)
+  sw.js                   → service worker: terima push, buka app saat notifikasi diklik
+  icons/                  → ikon PWA (placeholder polos, gampang diganti brandingnya)
+vercel.json               → jadwal 4 cron pengingat harian (WIB, lihat bagian 6 di atas)
 ```
+
+## Testing
+
+```
+npm test
+```
+
+Menjalankan `vitest` sekali (bukan watch mode) atas `lib/reminderLogic.test.js` dan
+`lib/nutrition.test.js` — logika murni pengingat push (siapa yang belum catat apa, susunan
+pesan, bank kalimat fallback) dan satu regression test untuk `todayISOInTimeZone` di titik
+pergantian hari WIB. Tidak ada test untuk panggilan jaringan (Gemini, Supabase, web-push) —
+itu diverifikasi manual lewat `npm run build` + uji coba nyata setelah deploy.
 
 ## Catatan
 
+- Notifikasi push (bagian 6) cuma bekerja penuh di iPhone/iPad kalau Bloom
+  sudah ditambahkan ke Layar Utama (iOS 16.4+) — batasan platform dari Apple,
+  bukan bug Bloom. Di Android/Chrome & desktop langsung jalan.
+- Ikon PWA (`public/icons/`) masih placeholder polos (lingkaran satu warna) —
+  gampang diganti kapan saja tanpa menyentuh kode lain, tinggal timpa file
+  PNG-nya.
 - Target gizi adalah panduan umum per trimester, bukan anjuran medis personal.
 - Nilai gizi contoh untuk Folamil Genio & Cavit D3 diambil dari label umum
   produk — sesuaikan dengan kemasan asli/anjuran dokter kamu lewat panel
