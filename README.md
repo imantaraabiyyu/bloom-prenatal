@@ -74,19 +74,20 @@ WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
    #   teks doang, jadi model termurah/tercepat cukup)
    GEMINI_CHAT_MODEL=gemini-2.5-pro          # tier "chat"
    GEMINI_CHAT_FALLBACK_MODELS=              # opsional, daftar model cadangan tier "chat"
-                                             # dipisah koma, dicoba urut kalau yang di atas kena
-                                             # limit kuota (429) — mis. gemini-3.1-pro-preview
+                                             # dipisah koma, dicoba urut kalau yang di atas gagal
+                                             # (kena limit kuota/429, atau model-nya sudah dipensiunkan
+                                             # Google/404, atau error lain) — mis. gemini-3.1-pro-preview
    GEMINI_MODEL=gemini-3.5-flash-lite        # tier "low" — PERHATIAN: nama env var ini dulu
                                              # dipakai bareng buat SEMUA panggilan Gemini
                                              # (termasuk Chat); sekarang cuma tier "low"
    GEMINI_FALLBACK_MODELS=                   # opsional, daftar model cadangan tier "low",
                                              # format sama seperti GEMINI_CHAT_FALLBACK_MODELS
 
-   # Kalau tier "chat" di atas kena limit kuota di SEMUA modelnya (jarang
-   # terjadi), otomatis jatuh ke tier "low" sebagai jalan terakhir — supaya
-   # tetap dapat balasan daripada gagal total — dan balasannya dikasih catatan
-   # kecil kalau itu dari model cadangan yang lebih sederhana, jadi jangan
-   # langsung disimpan mentah-mentah, cek ulang dulu.
+   # Kalau tier "chat" di atas gagal di SEMUA modelnya (jarang terjadi),
+   # otomatis jatuh ke tier "low" sebagai jalan terakhir — supaya tetap dapat
+   # balasan daripada gagal total — dan balasannya dikasih catatan kecil kalau
+   # itu dari model cadangan yang lebih sederhana, jadi jangan langsung
+   # disimpan mentah-mentah, cek ulang dulu.
 
    # Google kadang mem-pensiunkan model lama — ganti nilai di atas kalau suatu
    # saat muncul error "model ... no longer available".
