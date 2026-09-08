@@ -1,8 +1,8 @@
 {
   "crons": [
     { "path": "/api/cron/reminders?kind=morning", "schedule": "0 0 * * *" },
-    { "path": "/api/cron/reminders?kind=lunch", "schedule": "0 5 * * *" },
-    { "path": "/api/cron/reminders?kind=dinner", "schedule": "0 12 * * *" },
-    { "path": "/api/cron/reminders?kind=night", "schedule": "32 15 * * *" }
+    { "path": "/api/cron/reminders?kind=lunch", "schedule": "0 4 * * *" },
+    { "path": "/api/cron/reminders?kind=dinner", "schedule": "0 11 * * *" },
+    { "path": "/api/cron/reminders?kind=night", "schedule": "0 13 * * *" }
   ]
 }
