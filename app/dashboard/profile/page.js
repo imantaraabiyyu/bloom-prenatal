@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import HelpTip from "@/components/HelpTip";
+import { Home, NotebookText, MessageCircle, User, X, Star, AlertTriangle } from "lucide-react";
 import { todayISO } from "@/lib/nutrition";
 import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
@@ -20,7 +21,7 @@ const GENDER_META = {
 
 const FILTERS = [
   { key: "all", label: "Semua" },
-  { key: "favorite", label: "★ Favorit" },
+  { key: "favorite", label: "Favorit" },
   { key: "boy", label: "Laki-laki" },
   { key: "girl", label: "Perempuan" },
   { key: "unisex", label: "Unisex" },
@@ -249,10 +250,10 @@ export default function ProfilePage() {
           <span className="user-name">{user?.email}</span>
         </div>
         <div className="topbar-nav">
-          <Link href="/dashboard" className="nav-link">Dashboard</Link>
-          <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
-          <Link href="/dashboard/chat" className="nav-link">Chat</Link>
-          <Link href="/dashboard/profile" className="nav-link active">Profil</Link>
+          <Link href="/dashboard" className="nav-link"><Home size={19} /><span>Dashboard</span></Link>
+          <Link href="/dashboard/journal" className="nav-link"><NotebookText size={19} /><span>Jurnal</span></Link>
+          <Link href="/dashboard/chat" className="nav-link"><MessageCircle size={19} /><span>Chat</span></Link>
+          <Link href="/dashboard/profile" className="nav-link active"><User size={19} /><span>Profil</span></Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -441,7 +442,7 @@ export default function ProfilePage() {
                 key={f.key} className={`name-filter-btn ${filter === f.key ? "active" : ""}`}
                 onClick={() => setFilter(f.key)}
               >
-                {f.label}
+                {f.key === "favorite" && <Star size={12} />} {f.label}
               </button>
             ))}
           </div>
@@ -460,7 +461,7 @@ export default function ProfilePage() {
                     title={n.is_favorite ? "Hapus dari favorit" : "Tandai favorit"}
                     onClick={() => toggleFavorite(n.id, n.is_favorite)}
                   >
-                    {n.is_favorite ? "★" : "☆"}
+                    <Star size={16} fill={n.is_favorite ? "currentColor" : "none"} />
                   </button>
                   <div className="babyname-info">
                     <div className="babyname-name">
@@ -469,7 +470,7 @@ export default function ProfilePage() {
                     </div>
                     {n.note && <div className="babyname-note">{n.note}</div>}
                   </div>
-                  <ConfirmButton className="babyname-remove" title="Hapus nama ini" onConfirm={() => handleDelete(n.id)}>✕</ConfirmButton>
+                  <ConfirmButton className="babyname-remove" title="Hapus nama ini" onConfirm={() => handleDelete(n.id)}><X size={15} /></ConfirmButton>
                 </div>
               );
             })
