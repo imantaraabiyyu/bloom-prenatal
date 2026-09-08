@@ -5,6 +5,13 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import { NUTRIENT_ORDER, NUTRIENT_META, todayISO, vitaminItemToRow } from "@/lib/nutrition";
+import {
+  Home, NotebookText, MessageCircle, User, X, Check, Paperclip,
+  Camera, Images, AlertTriangle,
+  Image as ImageIcon, // aliased -- this file's resizeImageForChat uses the
+                       // real global `new Image()`, which a same-named
+                       // import would shadow and silently break
+} from "lucide-react";
 
 // Downscales a photo client-side before it ever leaves the browser — phone
 // camera photos can be 5-10MB+, which is both slow to upload and pushes
@@ -360,10 +367,10 @@ export default function ChatPage() {
           <span className="user-name">{user?.email}</span>
         </div>
         <div className="topbar-nav">
-          <Link href="/dashboard" className="nav-link">Dashboard</Link>
-          <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
-          <Link href="/dashboard/chat" className="nav-link active">Chat</Link>
-          <Link href="/dashboard/profile" className="nav-link">Profil</Link>
+          <Link href="/dashboard" className="nav-link"><Home size={19} /><span>Dashboard</span></Link>
+          <Link href="/dashboard/journal" className="nav-link"><NotebookText size={19} /><span>Jurnal</span></Link>
+          <Link href="/dashboard/chat" className="nav-link active"><MessageCircle size={19} /><span>Chat</span></Link>
+          <Link href="/dashboard/profile" className="nav-link"><User size={19} /><span>Profil</span></Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -405,7 +412,7 @@ export default function ChatPage() {
                   ) : (
                     <>
                       {m.imageUrl && <img className="chat-bubble-image" src={m.imageUrl} alt="" />}
-                      {!m.imageUrl && m.hadImage && <div className="chat-photo-placeholder">📷 Foto (tidak disimpan)</div>}
+                      {!m.imageUrl && m.hadImage && <div className="chat-photo-placeholder"><ImageIcon size={13} /> Foto (tidak disimpan)</div>}
                       {m.text && <span>{m.text}</span>}
                       {m.analysis?.category === "vitamin" ? (
                         <>
@@ -424,7 +431,7 @@ export default function ChatPage() {
                               {m.vitaminErrors?.[i] && <div className="chat-save-error">{m.vitaminErrors[i]}</div>}
                               {v.saved_vitamin_id && !v.undone && (
                                 <>
-                                  <span className="chat-saved-tag">✓ &quot;{v.name}&quot; tersimpan ke vitamin</span>
+                                  <span className="chat-saved-tag"><Check size={11} /> &quot;{v.name}&quot; tersimpan ke vitamin</span>
                                   <ConfirmButton onConfirm={() => undoSavedVitaminItem(m.id, i, v.saved_vitamin_id)}>Hapus</ConfirmButton>
                                 </>
                               )}
@@ -445,7 +452,7 @@ export default function ChatPage() {
                           {m.saveError && <div className="chat-save-error">{m.saveError}</div>}
                           {m.savedMealId && !m.undone && (
                             <div className="chat-bubble-actions">
-                              <span className="chat-saved-tag">✓ Tersimpan ke menu hari ini</span>
+                              <span className="chat-saved-tag"><Check size={11} /> Tersimpan ke menu hari ini</span>
                               <ConfirmButton onConfirm={() => undoSavedMeal(m.id, m.savedMealId)}>Hapus</ConfirmButton>
                             </div>
                           )}
@@ -465,7 +472,7 @@ export default function ChatPage() {
               <div className="pending-attachments">
                 <div className="pending-item">
                   <img src={pendingImage.url} alt="" />
-                  <button type="button" onClick={removePendingImage}>✕</button>
+                  <button type="button" onClick={removePendingImage}><X size={11} /></button>
                 </div>
               </div>
             )}
@@ -475,18 +482,18 @@ export default function ChatPage() {
                   type="button" className="attach-btn attach-menu-trigger" title="Lampirkan foto"
                   onClick={() => setAttachMenuOpen((o) => !o)}
                 >
-                  📎 Foto
+                  <Paperclip size={14} /> Foto
                 </button>
                 <div className="attach-menu-list">
                   <label className="attach-menu-item" onClick={() => setAttachMenuOpen(false)}>
-                    📷 Kamera
+                    <Camera size={15} /> Kamera
                     <input
                       type="file" accept="image/*" capture="environment"
                       onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }}
                     />
                   </label>
                   <label className="attach-menu-item" onClick={() => setAttachMenuOpen(false)}>
-                    🖼️ Galeri
+                    <Images size={15} /> Galeri
                     <input type="file" accept="image/*" onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
                   </label>
                 </div>
