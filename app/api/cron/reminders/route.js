@@ -50,6 +50,11 @@ export async function GET(request) {
     .select("id, user_id, endpoint, p256dh, auth_key");
   if (subError) return NextResponse.json({ error: subError.message }, { status: 500 });
   if (!subscriptionRows || subscriptionRows.length === 0) {
+    // Vercel Runtime Logs don't capture response bodies, only console
+    // output -- without this, a "no subscriptions at all" run (e.g. every
+    // subscription got pruned as dead, see the isDead branch below) looks
+    // identical to a healthy send in the dashboard: just a 200.
+    console.log(`cron/reminders kind=${kind} sent=0 pruned=0 skipped=0 subscribers=0`);
     return NextResponse.json({ kind, sent: 0, pruned: 0, skipped: 0, subscribers: 0 });
   }
 
@@ -140,5 +145,10 @@ export async function GET(request) {
 
   const { sent, pruned, skipped } = sumReminderResults(userResults);
 
+  // Same reasoning as the early-return above -- this is the only place the
+  // real per-run outcome (did anything actually get pushed, or did every
+  // subscription silently fail/get pruned) is visible anywhere, since it
+  // otherwise only exists in the response body Vercel Logs doesn't show.
+  console.log(`cron/reminders kind=${kind} sent=${sent} pruned=${pruned} skipped=${skipped} subscribers=${userIds.length}`);
   return NextResponse.json({ kind, sent, pruned, skipped, subscribers: userIds.length });
 }
