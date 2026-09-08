@@ -66,6 +66,11 @@ WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
    Environment Variables (produksi):
    ```
    GEMINI_API_KEY=...                       # dari langkah 1
+   GEMINI_API_KEY_FALLBACKS=                 # opsional, daftar API key cadangan dipisah koma —
+                                             # dicoba urut (per model, bukan per tier — lihat di
+                                             # bawah) kalau key di atas gagal/habis kuotanya.
+                                             # Bikin lagi API key gratis lain di link yang sama
+                                             # kalau mau isi ini.
 
    # Ada 2 "tier" model, masing-masing opsional (nilai di bawah ini defaultnya):
    # - tier "chat" dipakai tab Chat + transkrip Jurnal (butuh baca foto/audio,
@@ -88,6 +93,12 @@ WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
    # balasan daripada gagal total — dan balasannya dikasih catatan kecil kalau
    # itu dari model cadangan yang lebih sederhana, jadi jangan langsung
    # disimpan mentah-mentah, cek ulang dulu.
+
+   # Urutan coba-cobanya: tiap model dicoba dengan SEMUA API key (urut dari
+   # GEMINI_API_KEY_FALLBACKS) dulu sebelum pindah ke model berikutnya — jadi
+   # kalau key pertama habis kuotanya, dicoba dulu key kedua di model yang
+   # sama, baru kalau semua key juga gagal di model itu, pindah ke model
+   # cadangan berikutnya (dan mulai lagi dari key pertama).
 
    # Google kadang mem-pensiunkan model lama — ganti nilai di atas kalau suatu
    # saat muncul error "model ... no longer available".
