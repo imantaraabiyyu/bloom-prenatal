@@ -219,3 +219,24 @@ create policy "chat_messages: owner select" on public.chat_messages for select u
 create policy "chat_messages: owner insert" on public.chat_messages for insert with check (auth.uid() = user_id);
 create policy "chat_messages: owner update" on public.chat_messages for update using (auth.uid() = user_id);
 create policy "chat_messages: owner delete" on public.chat_messages for delete using (auth.uid() = user_id);
+
+-- 9) Langganan Web Push (satu baris per browser/device yang mengaktifkan
+-- notifikasi) — dipakai oleh app/api/push/subscribe/route.js (tulis, sebagai
+-- pengguna login lewat RLS biasa) dan app/api/cron/reminders/route.js (baca
+-- lintas pengguna lewat service-role client, lihat lib/supabaseAdmin.js,
+-- supaya cron harian bisa tahu siapa saja yang perlu diingatkan).
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  endpoint text not null unique,
+  p256dh text not null,
+  auth_key text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_user_idx on public.push_subscriptions (user_id);
+
+alter table public.push_subscriptions enable row level security;
+
+create policy "push_subscriptions: owner select" on public.push_subscriptions for select using (auth.uid() = user_id);
+create policy "push_subscriptions: owner insert" on public.push_subscriptions for insert with check (auth.uid() = user_id);
+create policy "push_subscriptions: owner delete" on public.push_subscriptions for delete using (auth.uid() = user_id);
