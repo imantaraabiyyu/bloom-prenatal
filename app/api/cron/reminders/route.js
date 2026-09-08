@@ -4,7 +4,7 @@ import { sendPush } from "@/lib/pushSender";
 import { generateDailyNudge, generateMealFact } from "@/lib/gemini";
 import {
   pickMissing, buildReminderBody, buildMorningBody, buildLunchBody, buildNightBody,
-  pickFallbackNudge, pickMealFactFallback,
+  pickFallbackNudge, pickMealFactFallback, sumReminderResults,
 } from "@/lib/reminderLogic";
 import { todayISOInTimeZone } from "@/lib/nutrition";
 import { computeGestationalAge, trimesterForWeeks } from "@/lib/pregnancy";
@@ -80,9 +80,15 @@ export async function GET(request) {
     vitaminUserIds = distinctUserIds(vitaminRows);
   }
 
-  let sent = 0, pruned = 0, skipped = 0;
-
-  for (const userId of userIds) {
+  // Every user is independent (own Gemini call, own subscriptions to push
+  // to), so they're processed concurrently rather than summed one-by-one --
+  // total wall-clock becomes roughly "slowest single user" instead of "every
+  // user's time added together", which is what let this route blow past
+  // Vercel's 60s function timeout as the subscriber count grew. Each task
+  // returns its own { sent, pruned, skipped } instead of mutating a shared
+  // counter, and sumReminderResults (lib/reminderLogic.js) adds them up once
+  // every task has settled.
+  const userResults = await Promise.all(userIds.map(async (userId) => {
     const profile = profileByUser.get(userId);
     const name = profile?.name || null;
     const ga = profile?.hpht ? computeGestationalAge(profile.hpht, today) : null;
@@ -92,7 +98,7 @@ export async function GET(request) {
     let body;
     if (kind === "dinner") {
       const { missingMeal, missingVitamin } = pickMissing(mealUserIds, vitaminUserIds, userId);
-      if (!missingMeal && !missingVitamin) { skipped++; continue; } // both already logged -- nothing to nudge about
+      if (!missingMeal && !missingVitamin) return { sent: 0, pruned: 0, skipped: 1 }; // both already logged -- nothing to nudge about
       let nudge;
       try { nudge = await generateDailyNudge({ trimester, weeks }); }
       catch { nudge = pickFallbackNudge(`${userId}:${today}:dinner`); }
@@ -110,18 +116,29 @@ export async function GET(request) {
     }
 
     const payload = { title: TITLES[kind], body, url: "/dashboard" };
-    for (const row of subscriptionsByUser.get(userId)) {
+    // Same reasoning one level down: this user's own devices/subscriptions
+    // are independent sends, so they go out concurrently too instead of
+    // one-by-one.
+    const subResults = await Promise.all(subscriptionsByUser.get(userId).map(async (row) => {
       const result = await sendPush(row, payload);
-      if (result.ok) {
-        sent++;
-      } else if (result.isDead) {
+      if (result.ok) return { sent: 1, pruned: 0 };
+      if (result.isDead) {
         await supabase.from("push_subscriptions").delete().eq("id", row.id);
-        pruned++;
+        return { sent: 0, pruned: 1 };
       }
       // A non-dead failure (network hiccup, push service outage, ...) is
       // logged by sendPush itself and just moved past -- no same-run retry.
-    }
-  }
+      return { sent: 0, pruned: 0 };
+    }));
+
+    return {
+      sent: subResults.reduce((n, r) => n + r.sent, 0),
+      pruned: subResults.reduce((n, r) => n + r.pruned, 0),
+      skipped: 0,
+    };
+  }));
+
+  const { sent, pruned, skipped } = sumReminderResults(userResults);
 
   return NextResponse.json({ kind, sent, pruned, skipped, subscribers: userIds.length });
 }
