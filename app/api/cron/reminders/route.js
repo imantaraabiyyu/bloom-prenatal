@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabaseAdmin";
 import { sendPush } from "@/lib/pushSender";
+import { sendReminderEmail } from "@/lib/emailSender";
 import { generateDailyNudge, generateMealFact } from "@/lib/gemini";
 import {
   pickMissing, buildReminderBody, buildMorningBody, buildLunchBody, buildNightBody,
@@ -54,8 +55,8 @@ export async function GET(request) {
     // output -- without this, a "no subscriptions at all" run (e.g. every
     // subscription got pruned as dead, see the isDead branch below) looks
     // identical to a healthy send in the dashboard: just a 200.
-    console.log(`cron/reminders kind=${kind} sent=0 pruned=0 skipped=0 subscribers=0`);
-    return NextResponse.json({ kind, sent: 0, pruned: 0, skipped: 0, subscribers: 0 });
+    console.log(`cron/reminders kind=${kind} sent=0 pruned=0 skipped=0 emailed=0 subscribers=0`);
+    return NextResponse.json({ kind, sent: 0, pruned: 0, skipped: 0, emailed: 0, subscribers: 0 });
   }
 
   const userIds = [...distinctUserIds(subscriptionRows)];
@@ -136,19 +137,34 @@ export async function GET(request) {
       return { sent: 0, pruned: 0 };
     }));
 
-    return {
-      sent: subResults.reduce((n, r) => n + r.sent, 0),
-      pruned: subResults.reduce((n, r) => n + r.pruned, 0),
-      skipped: 0,
-    };
+    const sentCount = subResults.reduce((n, r) => n + r.sent, 0);
+    const prunedCount = subResults.reduce((n, r) => n + r.pruned, 0);
+
+    // Last-resort fallback: every subscription this user had failed this
+    // run (whether just pruned as dead above, or a transient failure
+    // sendPush already logged) -- try email instead of leaving them with
+    // nothing. subscriptionsByUser.get(userId) is never empty here (userIds
+    // only contains users who had >=1 subscription row to begin with), so
+    // this only fires on a genuine "push attempted, none of it landed" --
+    // never for the dinner slot's early-return skip above, which never
+    // reaches this point at all.
+    let emailedCount = 0;
+    if (sentCount === 0) {
+      const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+      const email = authUser?.user?.email;
+      if (email && await sendReminderEmail(email, TITLES[kind], body)) emailedCount = 1;
+    }
+
+    return { sent: sentCount, pruned: prunedCount, skipped: 0, emailed: emailedCount };
   }));
 
-  const { sent, pruned, skipped } = sumReminderResults(userResults);
+  const { sent, pruned, skipped, emailed } = sumReminderResults(userResults);
 
   // Same reasoning as the early-return above -- this is the only place the
   // real per-run outcome (did anything actually get pushed, or did every
-  // subscription silently fail/get pruned) is visible anywhere, since it
-  // otherwise only exists in the response body Vercel Logs doesn't show.
-  console.log(`cron/reminders kind=${kind} sent=${sent} pruned=${pruned} skipped=${skipped} subscribers=${userIds.length}`);
-  return NextResponse.json({ kind, sent, pruned, skipped, subscribers: userIds.length });
+  // subscription silently fail/get pruned, and did the email fallback catch
+  // it) is visible anywhere, since it otherwise only exists in the response
+  // body Vercel Logs doesn't show.
+  console.log(`cron/reminders kind=${kind} sent=${sent} pruned=${pruned} skipped=${skipped} emailed=${emailed} subscribers=${userIds.length}`);
+  return NextResponse.json({ kind, sent, pruned, skipped, emailed, subscribers: userIds.length });
 }
