@@ -236,17 +236,17 @@ export default function Dashboard() {
     const text = await file.text();
     const parsed = parseMealCsv(text);
     if (parsed.length === 0) {
-      setMealError("⚠ Tidak ada baris yang dikenali. Pastikan ada kolom date dan minimal satu kolom gizi.");
+      setMealError("Tidak ada baris yang dikenali. Pastikan ada kolom date dan minimal satu kolom gizi.");
       return;
     }
     const { unique, duplicateCount } = dedupeMeals(meals, parsed);
     if (unique.length === 0) {
-      setMealError(`⚠ Semua ${parsed.length} baris sudah ada sebelumnya (tanggal + nama menu sama). Tidak ada yang ditambahkan.`);
+      setMealError(`Semua ${parsed.length} baris sudah ada sebelumnya (tanggal + nama menu sama). Tidak ada yang ditambahkan.`);
       return;
     }
     const rows = unique.map((r) => ({ ...r, user_id: user.id }));
     const { data, error } = await supabase.from("meals").insert(rows).select();
-    if (error) { setMealError("⚠ " + error.message); return; }
+    if (error) { setMealError(error.message); return; }
     setMeals((prev) => [...prev, ...(data || [])]);
     const dupNote = duplicateCount > 0 ? ` · ${duplicateCount} baris duplikat dilewati` : "";
     setMealFileName(`${file.name} ditambahkan · total ${meals.length + (data?.length || 0)} baris menu${dupNote}`);
@@ -258,7 +258,7 @@ export default function Dashboard() {
     const text = await file.text();
     const parsed = parseVitaminCsv(text);
     if (parsed.length === 0) {
-      setVitError("⚠ Tidak ada baris yang dikenali. Pastikan ada kolom name.");
+      setVitError("Tidak ada baris yang dikenali. Pastikan ada kolom name.");
       return;
     }
     const rows = parsed.map((v) => {
@@ -267,7 +267,7 @@ export default function Dashboard() {
       return full;
     });
     const { data, error } = await supabase.from("vitamins").insert(rows).select();
-    if (error) { setVitError("⚠ " + error.message); return; }
+    if (error) { setVitError(error.message); return; }
     setVitamins((prev) => [...prev, ...(data || [])]);
     setVitFileName(`${file.name} · ${data?.length || 0} vitamin ditambahkan`);
   }
@@ -289,8 +289,8 @@ export default function Dashboard() {
   async function handleAddMeal() {
     setMealFormError("");
     const name = mealFormName.trim();
-    if (!name) { setMealFormError("⚠ Isi dulu nama menunya."); return; }
-    if (!mealFormDate) { setMealFormError("⚠ Pilih tanggal untuk menu ini."); return; }
+    if (!name) { setMealFormError("Isi dulu nama menunya."); return; }
+    if (!mealFormDate) { setMealFormError("Pilih tanggal untuk menu ini."); return; }
     setMealFormSaving(true);
     const row = { user_id: user.id, date: mealFormDate, meal: name };
     NUTRIENT_ORDER.forEach((n) => {
@@ -299,7 +299,7 @@ export default function Dashboard() {
     });
     const { data, error } = await supabase.from("meals").insert(row).select().maybeSingle();
     setMealFormSaving(false);
-    if (error) { setMealFormError("⚠ " + error.message); return; }
+    if (error) { setMealFormError(error.message); return; }
     setMeals((prev) => [...prev, data]);
     setMealFormName("");
     setMealFormValues({});
@@ -318,13 +318,13 @@ export default function Dashboard() {
     const row = { user_id: user.id, date: currentDate, meal: "Air minum", water_ml: amount };
     const { data, error } = await supabase.from("meals").insert(row).select().maybeSingle();
     setWaterSaving(false);
-    if (error) { setWaterError("⚠ " + error.message); return; }
+    if (error) { setWaterError(error.message); return; }
     setMeals((prev) => [...prev, data]);
   }
 
   function handleWaterCustomAdd() {
     const amt = parseFloat(waterAmount);
-    if (!amt || amt <= 0) { setWaterError("⚠ Masukkan jumlah ml yang valid."); return; }
+    if (!amt || amt <= 0) { setWaterError("Masukkan jumlah ml yang valid."); return; }
     addWater(amt);
     setWaterAmount("");
   }
@@ -357,7 +357,7 @@ export default function Dashboard() {
   async function handleAddVitamin() {
     setVitFormError("");
     const name = vitFormName.trim();
-    if (!name) { setVitFormError("⚠ Isi dulu nama vitamin/suplemennya."); return; }
+    if (!name) { setVitFormError("Isi dulu nama vitamin/suplemennya."); return; }
     setVitFormSaving(true);
     const row = { user_id: user.id, name };
     NUTRIENT_ORDER.forEach((n) => {
@@ -367,7 +367,7 @@ export default function Dashboard() {
     row.extra_nutrients = buildExtraNutrientsMap(vitFormExtra);
     const { data, error } = await supabase.from("vitamins").insert(row).select().maybeSingle();
     setVitFormSaving(false);
-    if (error) { setVitFormError("⚠ " + error.message); return; }
+    if (error) { setVitFormError(error.message); return; }
     setVitamins((prev) => [...prev, data]);
     setVitFormName("");
     setVitFormValues({});
@@ -485,9 +485,12 @@ export default function Dashboard() {
         </div>
         {!hpht && (
           <p className="format-hint trimester-hint">
-            ⚠ HPL/HPHT belum diset, jadi trimester ditampilkan sebagai Trimester 1 sementara.
-            Atur di <Link href="/dashboard/profile">tab Profil</Link> supaya trimester dan target
-            gizi ikut usia kehamilanmu yang sebenarnya.
+            <AlertTriangle size={14} />
+            <span>
+              HPL/HPHT belum diset, jadi trimester ditampilkan sebagai Trimester 1 sementara.
+              Atur di <Link href="/dashboard/profile">tab Profil</Link> supaya trimester dan target
+              gizi ikut usia kehamilanmu yang sebenarnya.
+            </span>
           </p>
         )}
       </div>
@@ -524,7 +527,7 @@ export default function Dashboard() {
               <span>date, meal, calories, protein_g, iron_mg...</span>
             </label>
             {mealFileName && <div className="file-name"><Check size={12} /> {mealFileName}</div>}
-            {mealError && <div className="error-box">{mealError}</div>}
+            {mealError && <div className="error-box"><AlertTriangle size={13} /> {mealError}</div>}
             <button className="sample-btn" onClick={() => downloadText("contoh-menu.csv", SAMPLE_MEAL_CSV)}>⬇ Contoh CSV menu</button>
 
             <button className="manual-form-toggle" onClick={() => (mealFormOpen ? closeMealForm() : openMealForm())}>
@@ -554,7 +557,7 @@ export default function Dashboard() {
                     );
                   })}
                 </div>
-                {mealFormError && <div className="error-box">{mealFormError}</div>}
+                {mealFormError && <div className="error-box"><AlertTriangle size={13} /> {mealFormError}</div>}
                 <div className="manual-form-actions">
                   <button className="manual-form-save" onClick={handleAddMeal} disabled={mealFormSaving}>
                     {mealFormSaving ? "Menyimpan…" : "Simpan menu"}
@@ -580,7 +583,7 @@ export default function Dashboard() {
               <span>name, folate_mcg, iron_mg, calcium_mg, vitamin_d_mcg...</span>
             </label>
             {vitFileName && <div className="file-name"><Check size={12} /> {vitFileName}</div>}
-            {vitError && <div className="error-box">{vitError}</div>}
+            {vitError && <div className="error-box"><AlertTriangle size={13} /> {vitError}</div>}
             <button className="sample-btn" onClick={() => downloadText("contoh-vitamin.csv", SAMPLE_VIT_CSV)}>⬇ Contoh CSV vitamin (Folamil Genio, Cavit D3)</button>
 
             <button className="manual-form-toggle" onClick={() => (vitFormOpen ? closeVitForm() : openVitForm())}>
@@ -636,7 +639,7 @@ export default function Dashboard() {
                   <button type="button" className="extra-nutrient-add" onClick={addVitExtraRow}>+ Tambah nutrisi lain</button>
                 </div>
 
-                {vitFormError && <div className="error-box">{vitFormError}</div>}
+                {vitFormError && <div className="error-box"><AlertTriangle size={13} /> {vitFormError}</div>}
                 <div className="manual-form-actions">
                   <button className="manual-form-save" onClick={handleAddVitamin} disabled={vitFormSaving}>
                     {vitFormSaving ? "Menyimpan…" : "Simpan vitamin"}
@@ -793,7 +796,7 @@ export default function Dashboard() {
                 />
                 <button onClick={handleWaterCustomAdd} disabled={waterSaving}>Tambah</button>
               </div>
-              {waterError && <div className="error-box">{waterError}</div>}
+              {waterError && <div className="error-box"><AlertTriangle size={13} /> {waterError}</div>}
             </div>
 
             <div className="divider" />

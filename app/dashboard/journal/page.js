@@ -593,7 +593,7 @@ export default function JournalPage() {
           </HelpTip>
         </div>
 
-        {attachErr && <div className="error-box">{attachErr}</div>}
+        {attachErr && <div className="error-box"><AlertTriangle size={13} /> {attachErr}</div>}
 
         {(photos.length > 0 || videos.length > 0 || voiceNotes.length > 0) && (
           <div className="pending-attachments">
@@ -654,8 +654,11 @@ export default function JournalPage() {
 
                 {v.transcribeError && (
                   <div className="error-box">
-                    {v.transcribeError}{" "}
-                    <button type="button" className="retry-inline-btn" onClick={() => transcribePendingVoice(target, i)}>Coba lagi</button>
+                    <AlertTriangle size={13} />
+                    <span>
+                      {v.transcribeError}{" "}
+                      <button type="button" className="retry-inline-btn" onClick={() => transcribePendingVoice(target, i)}>Coba lagi</button>
+                    </span>
                   </div>
                 )}
 
@@ -746,7 +749,7 @@ export default function JournalPage() {
 
             {renderAttachSection("compose")}
 
-            {error && <div className="error-box">{error}</div>}
+            {error && <div className="error-box"><AlertTriangle size={13} /> {error}</div>}
 
             <button className="journal-save-btn" onClick={handleSave} disabled={saving}>
               {saving ? "Menyimpan…" : "Simpan catatan"}
@@ -800,7 +803,7 @@ export default function JournalPage() {
                         value={editNote} onChange={(ev) => setEditNote(ev.target.value)}
                       />
                       {renderAttachSection("edit")}
-                      {editError && <div className="error-box">{editError}</div>}
+                      {editError && <div className="error-box"><AlertTriangle size={13} /> {editError}</div>}
                       <div className="manual-form-actions">
                         <button className="manual-form-save" onClick={() => saveEditEntry(e)} disabled={editSaving}>
                           {editSaving ? "Menyimpan…" : "Simpan perubahan"}

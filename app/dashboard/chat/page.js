@@ -287,7 +287,7 @@ export default function ChatPage() {
     NUTRIENT_ORDER.forEach((n) => { row[n] = analysis[n]; });
     const { data: saved, error } = await supabase.from("meals").insert(row).select().maybeSingle();
     if (error) {
-      setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, saving: false, saveError: "⚠ Gagal menyimpan, coba lagi." } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, saving: false, saveError: "Gagal menyimpan, coba lagi." } : m)));
       return;
     }
     await supabase.from("chat_messages").update({ saved_meal_id: saved.id }).eq("id", msgId);
@@ -332,7 +332,7 @@ export default function ChatPage() {
       setMessages((prev) => prev.map((m) => (m.id === msgId ? {
         ...m,
         vitaminSaving: { ...(m.vitaminSaving || {}), [itemIndex]: false },
-        vitaminErrors: { ...(m.vitaminErrors || {}), [itemIndex]: "⚠ Gagal menyimpan, coba lagi." },
+        vitaminErrors: { ...(m.vitaminErrors || {}), [itemIndex]: "Gagal menyimpan, coba lagi." },
       } : m)));
       return;
     }
@@ -428,7 +428,7 @@ export default function ChatPage() {
                                   {m.vitaminSaving?.[i] ? "Menyimpan…" : `Simpan "${v.name}" ke Dashboard`}
                                 </button>
                               )}
-                              {m.vitaminErrors?.[i] && <div className="chat-save-error">{m.vitaminErrors[i]}</div>}
+                              {m.vitaminErrors?.[i] && <div className="chat-save-error"><AlertTriangle size={12} /> {m.vitaminErrors[i]}</div>}
                               {v.saved_vitamin_id && !v.undone && (
                                 <>
                                   <span className="chat-saved-tag"><Check size={11} /> &quot;{v.name}&quot; tersimpan ke vitamin</span>
@@ -449,7 +449,7 @@ export default function ChatPage() {
                               </button>
                             </div>
                           )}
-                          {m.saveError && <div className="chat-save-error">{m.saveError}</div>}
+                          {m.saveError && <div className="chat-save-error"><AlertTriangle size={12} /> {m.saveError}</div>}
                           {m.savedMealId && !m.undone && (
                             <div className="chat-bubble-actions">
                               <span className="chat-saved-tag"><Check size={11} /> Tersimpan ke menu hari ini</span>

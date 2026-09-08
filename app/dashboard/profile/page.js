@@ -127,7 +127,7 @@ export default function ProfilePage() {
     setNameSaving(true);
     const { error } = await supabase.from("profiles").upsert({ user_id: user.id, name: trimmed || null }, { onConflict: "user_id" });
     setNameSaving(false);
-    if (error) { setNameError("⚠ " + error.message); return; }
+    if (error) { setNameError(error.message); return; }
     setName(trimmed);
   }
 
@@ -140,7 +140,7 @@ export default function ProfilePage() {
       setPushSubscribed(true);
       setPushPermission("granted");
     } catch (e) {
-      setPushError("⚠ " + e.message);
+      setPushError(e.message);
       // permission could've ended up "denied" even though subscribe threw --
       // re-read so the panel reflects the browser's actual state either way.
       if (typeof Notification !== "undefined") setPushPermission(Notification.permission);
@@ -156,7 +156,7 @@ export default function ProfilePage() {
       await unsubscribeFromPush();
       setPushSubscribed(false);
     } catch (e) {
-      setPushError("⚠ " + e.message);
+      setPushError(e.message);
     } finally {
       setPushBusy(false);
     }
@@ -191,18 +191,18 @@ export default function ProfilePage() {
   async function saveHpht() {
     setHphtError("");
     if (!hphtDraft) {
-      setHphtError(hphtInputMode === "hpl" ? "⚠ Pilih tanggal HPL dulu." : "⚠ Pilih tanggal HPHT dulu.");
+      setHphtError(hphtInputMode === "hpl" ? "Pilih tanggal HPL dulu." : "Pilih tanggal HPHT dulu.");
       return;
     }
     const hphtToSave = hphtInputMode === "hpl" ? computeHPHTFromHPL(hphtDraft) : hphtDraft;
     if (!computeGestationalAge(hphtToSave, todayISO())) {
-      setHphtError("⚠ Tanggal ini menghasilkan usia kehamilan yang tidak valid (di masa depan). Cek lagi tanggalnya.");
+      setHphtError("Tanggal ini menghasilkan usia kehamilan yang tidak valid (di masa depan). Cek lagi tanggalnya.");
       return;
     }
     setHphtSaving(true);
     const { error } = await supabase.from("profiles").upsert({ user_id: user.id, hpht: hphtToSave }, { onConflict: "user_id" });
     setHphtSaving(false);
-    if (error) { setHphtError("⚠ " + error.message); return; }
+    if (error) { setHphtError(error.message); return; }
     setHpht(hphtToSave);
     setHphtEditing(false);
   }
@@ -211,12 +211,12 @@ export default function ProfilePage() {
   async function handleAdd() {
     setFormError("");
     const name = formName.trim();
-    if (!name) { setFormError("⚠ Isi dulu namanya."); return; }
+    if (!name) { setFormError("Isi dulu namanya."); return; }
     setFormSaving(true);
     const row = { user_id: user.id, name, gender: formGender || null, note: formNote.trim() || null };
     const { data, error } = await supabase.from("baby_names").insert(row).select().maybeSingle();
     setFormSaving(false);
-    if (error) { setFormError("⚠ " + error.message); return; }
+    if (error) { setFormError(error.message); return; }
     setNames((prev) => [...prev, data].sort((a, b) => (b.is_favorite - a.is_favorite) || a.name.localeCompare(b.name)));
     setFormName("");
     setFormGender("");
@@ -286,7 +286,7 @@ export default function ProfilePage() {
               {nameSaving ? "Menyimpan…" : "Simpan"}
             </button>
           </div>
-          {nameError && <div className="error-box">{nameError}</div>}
+          {nameError && <div className="error-box"><AlertTriangle size={13} /> {nameError}</div>}
         </div>
 
         {/* Notifikasi — Web Push (lihat lib/push.js + app/api/cron/reminders) */}
@@ -303,13 +303,13 @@ export default function ProfilePage() {
           </h2>
           {!pushSupported ? (
             <p className="format-hint" style={{ marginTop: 0 }}>
-              ⚠ Push notification belum didukung di browser ini.
+              <AlertTriangle size={13} /> Push notification belum didukung di browser ini.
             </p>
           ) : (
             <>
               {pushPermission === "denied" && (
                 <div className="error-box">
-                  ⚠ Izin notifikasi ditolak di browser ini. Aktifkan lagi lewat pengaturan situs
+                  <AlertTriangle size={13} /> Izin notifikasi ditolak di browser ini. Aktifkan lagi lewat pengaturan situs
                   (biasanya ikon gembok di address bar), lalu muat ulang halaman ini.
                 </div>
               )}
@@ -325,7 +325,7 @@ export default function ProfilePage() {
                   {pushBusy ? "Memproses…" : "Aktifkan pengingat"}
                 </button>
               )}
-              {pushError && <div className="error-box">{pushError}</div>}
+              {pushError && <div className="error-box"><AlertTriangle size={13} /> {pushError}</div>}
             </>
           )}
         </div>
@@ -369,7 +369,7 @@ export default function ProfilePage() {
               {hphtInputMode === "hpl" && hphtDraft && (
                 <p className="format-hint">→ HPHT dihitung otomatis: {formatDateID(computeHPHTFromHPL(hphtDraft))}</p>
               )}
-              {hphtError && <div className="error-box">{hphtError}</div>}
+              {hphtError && <div className="error-box"><AlertTriangle size={13} /> {hphtError}</div>}
               <div className="manual-form-actions">
                 <button className="manual-form-save" onClick={saveHpht} disabled={hphtSaving}>
                   {hphtSaving ? "Menyimpan…" : "Simpan"}
@@ -425,7 +425,7 @@ export default function ProfilePage() {
               className="journal-textarea" rows={2} placeholder="Arti/catatan (opsional)"
               value={formNote} onChange={(e) => setFormNote(e.target.value)}
             />
-            {formError && <div className="error-box">{formError}</div>}
+            {formError && <div className="error-box"><AlertTriangle size={13} /> {formError}</div>}
             <div className="manual-form-actions">
               <button className="manual-form-save" onClick={handleAdd} disabled={formSaving}>
                 {formSaving ? "Menyimpan…" : "Tambah nama"}
