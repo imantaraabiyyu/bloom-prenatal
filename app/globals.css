@@ -102,7 +102,7 @@ button, input { font-family: inherit; }
 .upload-drop .ico { font-size: 20px; }
 .upload-drop p { margin: 8px 0 2px; font-size: 13.5px; color: #e8dde5; }
 .upload-drop span { font-size: 11.5px; color: var(--text-dimmer); }
-.file-name { margin-top: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--sage); }
+.file-name { margin-top: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--sage); display: flex; align-items: center; gap: 5px; }
 .sample-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; background: none; border: none; color: var(--lilac); font-size: 12.5px; cursor: pointer; padding: 0; }
 .sample-btn:hover { color: var(--accent); }
 .error-box { margin-top: 10px; background: rgba(199,123,99,0.12); border: 1px solid rgba(199,123,99,0.3); border-radius: 10px; padding: 9px 11px; font-size: 12.5px; color: #E8B8A8; }

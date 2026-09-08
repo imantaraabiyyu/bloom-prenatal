@@ -7,6 +7,10 @@ import ConfirmButton from "@/components/ConfirmButton";
 import MiniCalendar from "@/components/MiniCalendar";
 import HelpTip from "@/components/HelpTip";
 import {
+  Home, NotebookText, MessageCircle, User, UtensilsCrossed, Pill, Droplet,
+  Sprout, X, Check, AlertTriangle,
+} from "lucide-react";
+import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
   parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
@@ -245,7 +249,7 @@ export default function Dashboard() {
     if (error) { setMealError("⚠ " + error.message); return; }
     setMeals((prev) => [...prev, ...(data || [])]);
     const dupNote = duplicateCount > 0 ? ` · ${duplicateCount} baris duplikat dilewati` : "";
-    setMealFileName(`✓ ${file.name} ditambahkan · total ${meals.length + (data?.length || 0)} baris menu${dupNote}`);
+    setMealFileName(`${file.name} ditambahkan · total ${meals.length + (data?.length || 0)} baris menu${dupNote}`);
   }
 
   async function handleVitFile(file) {
@@ -265,7 +269,7 @@ export default function Dashboard() {
     const { data, error } = await supabase.from("vitamins").insert(rows).select();
     if (error) { setVitError("⚠ " + error.message); return; }
     setVitamins((prev) => [...prev, ...(data || [])]);
-    setVitFileName(`✓ ${file.name} · ${data?.length || 0} vitamin ditambahkan`);
+    setVitFileName(`${file.name} · ${data?.length || 0} vitamin ditambahkan`);
   }
 
   // ---------------- manual meal entry ----------------
@@ -455,10 +459,10 @@ export default function Dashboard() {
           <span className="user-name">{user?.email}</span>
         </div>
         <div className="topbar-nav">
-          <Link href="/dashboard" className="nav-link active">Dashboard</Link>
-          <Link href="/dashboard/journal" className="nav-link">Jurnal</Link>
-          <Link href="/dashboard/chat" className="nav-link">Chat</Link>
-          <Link href="/dashboard/profile" className="nav-link">Profil</Link>
+          <Link href="/dashboard" className="nav-link active"><Home size={19} /><span>Dashboard</span></Link>
+          <Link href="/dashboard/journal" className="nav-link"><NotebookText size={19} /><span>Jurnal</span></Link>
+          <Link href="/dashboard/chat" className="nav-link"><MessageCircle size={19} /><span>Chat</span></Link>
+          <Link href="/dashboard/profile" className="nav-link"><User size={19} /><span>Profil</span></Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -515,11 +519,11 @@ export default function Dashboard() {
             </h2>
             <label className="upload-drop" {...makeDropHandlers(handleMealFile)}>
               <input type="file" accept=".csv,text/csv" onChange={(e) => handleMealFile(e.target.files?.[0])} />
-              <div className="ico">🍽️</div>
+              <div className="ico"><UtensilsCrossed size={22} /></div>
               <p>Unggah CSV menu makan</p>
               <span>date, meal, calories, protein_g, iron_mg...</span>
             </label>
-            {mealFileName && <div className="file-name">{mealFileName}</div>}
+            {mealFileName && <div className="file-name"><Check size={12} /> {mealFileName}</div>}
             {mealError && <div className="error-box">{mealError}</div>}
             <button className="sample-btn" onClick={() => downloadText("contoh-menu.csv", SAMPLE_MEAL_CSV)}>⬇ Contoh CSV menu</button>
 
@@ -571,11 +575,11 @@ export default function Dashboard() {
             </h2>
             <label className="upload-drop" {...makeDropHandlers(handleVitFile)}>
               <input type="file" accept=".csv,text/csv" onChange={(e) => handleVitFile(e.target.files?.[0])} />
-              <div className="ico">💊</div>
+              <div className="ico"><Pill size={22} /></div>
               <p>Unggah CSV vitamin (isi 1x saja)</p>
               <span>name, folate_mcg, iron_mg, calcium_mg, vitamin_d_mcg...</span>
             </label>
-            {vitFileName && <div className="file-name">{vitFileName}</div>}
+            {vitFileName && <div className="file-name"><Check size={12} /> {vitFileName}</div>}
             {vitError && <div className="error-box">{vitError}</div>}
             <button className="sample-btn" onClick={() => downloadText("contoh-vitamin.csv", SAMPLE_VIT_CSV)}>⬇ Contoh CSV vitamin (Folamil Genio, Cavit D3)</button>
 
@@ -624,7 +628,7 @@ export default function Dashboard() {
                             type="text" placeholder="Satuan (mis. mg)"
                             value={r.unit} onChange={(e) => updateVitExtraRow(i, "unit", e.target.value)}
                           />
-                          <button type="button" onClick={() => removeVitExtraRow(i)} title="Hapus baris ini">✕</button>
+                          <button type="button" onClick={() => removeVitExtraRow(i)} title="Hapus baris ini"><X size={15} /></button>
                         </div>
                       ))}
                     </div>
@@ -648,7 +652,7 @@ export default function Dashboard() {
         <div className="panel rings-panel">
           {!currentDate || activeNutrients.length === 0 ? (
             <div className="rings-empty">
-              <div style={{ fontSize: 26 }}>🌱</div>
+              <div style={{ color: "var(--sage)" }}><Sprout size={30} /></div>
               <p>Belum ada data. Unggah menu hari ini untuk melihat cincin gizinya.</p>
             </div>
           ) : (
@@ -741,7 +745,7 @@ export default function Dashboard() {
                     <div className="vitamin-name">{v.name}</div>
                     <div className="vitamin-detail">{detailParts.join(" · ") || "tanpa data gizi"}</div>
                   </div>
-                  <ConfirmButton className="vitamin-remove" title="Hapus vitamin ini" onConfirm={() => removeVitamin(v.id)}>✕</ConfirmButton>
+                  <ConfirmButton className="vitamin-remove" title="Hapus vitamin ini" onConfirm={() => removeVitamin(v.id)}><X size={16} /></ConfirmButton>
                 </div>
               );
             })
@@ -768,7 +772,7 @@ export default function Dashboard() {
         {/* Cairan + menu hari ini */}
         {currentDate && (
           <div className="panel full">
-            <h2>💧 Cairan — {currentDate}</h2>
+            <h2><Droplet size={18} /> Cairan — {currentDate}</h2>
             <div className="water-widget">
               <div className="water-widget-label">
                 <span>Cairan hari ini</span>
@@ -794,7 +798,7 @@ export default function Dashboard() {
 
             <div className="divider" />
 
-            <h2>🍽️ Menu yang sudah dimakan — {currentDate}</h2>
+            <h2><UtensilsCrossed size={18} /> Menu yang sudah dimakan — {currentDate}</h2>
             {todaysMeals.length === 0 ? (
               <div className="meal-list-empty">Belum ada menu tercatat untuk tanggal ini. Unggah CSV atau tambah manual di panel kiri.</div>
             ) : (
@@ -805,11 +809,11 @@ export default function Dashboard() {
                     <div className="meal-list-info">
                       <div className="meal-list-name">
                         {m.meal || "Tanpa nama"}
-                        {m.source === "chat" && <span className="meal-source-badge" title="Dicatat otomatis lewat foto di Chat">💬</span>}
+                        {m.source === "chat" && <span className="meal-source-badge" title="Dicatat otomatis lewat foto di Chat"><MessageCircle size={12} /></span>}
                       </div>
                       <div className="meal-list-detail">{detailParts.join(" · ") || "tanpa data gizi"}</div>
                     </div>
-                    <ConfirmButton className="meal-list-remove" title="Hapus menu ini" onConfirm={() => handleDeleteMeal(m.id)}>✕</ConfirmButton>
+                    <ConfirmButton className="meal-list-remove" title="Hapus menu ini" onConfirm={() => handleDeleteMeal(m.id)}><X size={15} /></ConfirmButton>
                   </div>
                 );
               })
