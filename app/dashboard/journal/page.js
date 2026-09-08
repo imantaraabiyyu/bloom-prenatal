@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import { todayISO } from "@/lib/nutrition";
+import { computeGestationalAge, trimesterForWeeks } from "@/lib/pregnancy";
 import {
   MOODS, moodMeta, ATTACHMENT_KINDS,
   JOURNAL_BUCKET, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MB, MAX_ATTACHMENTS_PER_ENTRY, MAX_RECORDING_SECONDS,
@@ -15,6 +16,19 @@ function formatSeconds(s) {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+// Same t1/t2/t3 -> "Trimester N" labels app/dashboard/page.js already uses.
+const TRIMESTER_LABEL = { t1: "Trimester 1", t2: "Trimester 2", t3: "Trimester 3" };
+
+// null (not a fallback like "Trimester 1") when HPHT isn't set yet or the
+// entry predates it -- computeGestationalAge already returns null for
+// both cases, so there's nothing to invent here; the caller just doesn't
+// render a label rather than guessing.
+function weekTrimesterLabel(hpht, entryDate) {
+  const ga = computeGestationalAge(hpht, entryDate);
+  if (!ga) return null;
+  return `Minggu ke-${ga.weeks} · ${TRIMESTER_LABEL[trimesterForWeeks(ga.weeks)]}`;
 }
 
 function blobToBase64(blob) {
@@ -41,9 +55,11 @@ export default function JournalPage() {
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState(null); // click-again-to-confirm delete
+  const [hpht, setHpht] = useState(null); // for the history list's week/trimester label only -- read-only here, set in Profil
 
-  // editing an existing entry — date/mood/note only; attachments keep their
-  // own add-at-creation-time/delete-only management, not touched here
+  // editing an existing entry — date/mood/note, and (like the composer)
+  // new attachments too now; existing attachments keep their own
+  // delete-only management (handleDeleteAttachment), unrelated to this
   const [editingEntryId, setEditingEntryId] = useState(null);
   const [editDate, setEditDate] = useState("");
   const [editMood, setEditMood] = useState(null);
@@ -63,8 +79,26 @@ export default function JournalPage() {
   const [pendingVoiceNotes, setPendingVoiceNotes] = useState([]); // [{ blob, url, mimeType }]
   const [attachError, setAttachError] = useState("");
 
+  // Same shape, for whichever entry is currently being edited -- kept
+  // separate from the composer's own pending state above rather than
+  // shared, since the composer (always on-screen) and an edit session
+  // (opened inline within one history entry) can both be "open" in the UI
+  // at once; editingEntryId is singular (only one entry editable at a
+  // time), so one set of these is enough -- no per-entry-id map needed.
+  const [editPendingPhotos, setEditPendingPhotos] = useState([]);
+  const [editPendingVideos, setEditPendingVideos] = useState([]);
+  const [editPendingVoiceNotes, setEditPendingVoiceNotes] = useState([]);
+  const [editAttachError, setEditAttachError] = useState("");
+
+  // Only one microphone recording can physically happen at a time, so
+  // isRecording/recordSeconds/the refs below stay shared between compose
+  // and edit -- recordingTarget just remembers which one asked for it, so
+  // onstop delivers the finished blob to the right pending list, and the
+  // *other* target's record button can disable itself meanwhile instead
+  // of offering a confusing second simultaneous recording.
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [recordingTarget, setRecordingTarget] = useState(null); // "compose" | "edit" | null
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
   const recordTimerRef = useRef(null);
@@ -87,6 +121,13 @@ export default function JournalPage() {
       if (!sessionData.session) { router.replace("/login"); return; }
       const u = sessionData.session.user;
       setUser(u);
+
+      // Read-only here (unlike the Dashboard, which creates a profile row
+      // if none exists yet) -- this page only needs hpht for the history
+      // list's week/trimester label, and a missing profile/hpht just
+      // means that label stays hidden (see weekTrimesterLabel).
+      const { data: profile } = await supabase.from("profiles").select("hpht").eq("user_id", u.id).maybeSingle();
+      setHpht(profile?.hpht || null);
 
       const { data: rows } = await supabase
         .from("journal_entries")
@@ -126,8 +167,9 @@ export default function JournalPage() {
   // past the file-size limit
   useEffect(() => {
     if (isRecording && recordSeconds >= MAX_RECORDING_SECONDS) {
+      const setAttachErr = recordingTarget === "edit" ? setEditAttachError : setAttachError;
       stopRecording();
-      setAttachError(`⚠ Rekaman dihentikan otomatis di batas ${Math.round(MAX_RECORDING_SECONDS / 60)} menit.`);
+      setAttachErr(`⚠ Rekaman dihentikan otomatis di batas ${Math.round(MAX_RECORDING_SECONDS / 60)} menit.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordSeconds, isRecording]);
@@ -138,17 +180,29 @@ export default function JournalPage() {
   }
 
   // ---------------- attachments: pick files ----------------
-  function pendingCount() {
+  // `target`: "compose" (the always-visible new-entry form) or "edit"
+  // (whichever entry is currently open via startEditEntry) -- picks which
+  // parallel set of state below a call operates on. Edit mode's count
+  // also includes that entry's *existing* attachments, so the combined
+  // total still respects MAX_ATTACHMENTS_PER_ENTRY (a per-entry cap, not
+  // per add-session).
+  function pendingCount(target) {
+    if (target === "edit") {
+      const entry = entries.find((e) => e.id === editingEntryId);
+      const existing = entry?.attachments?.length || 0;
+      return existing + editPendingPhotos.length + editPendingVideos.length + editPendingVoiceNotes.length;
+    }
     return pendingPhotos.length + pendingVideos.length + pendingVoiceNotes.length;
   }
 
-  function addPendingFiles(kind, fileList) {
-    setAttachError("");
+  function addPendingFiles(target, kind, fileList) {
+    const setAttachErr = target === "edit" ? setEditAttachError : setAttachError;
+    setAttachErr("");
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
 
     // cap first so type/size checks below only run on files that have room
-    const room = Math.max(MAX_ATTACHMENTS_PER_ENTRY - pendingCount(), 0);
+    const room = Math.max(MAX_ATTACHMENTS_PER_ENTRY - pendingCount(target), 0);
     const withinCap = files.slice(0, room);
     const overCap = files.length - withinCap.length;
 
@@ -158,18 +212,22 @@ export default function JournalPage() {
     const ok = rightType.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
 
     const withUrls = ok.map((file) => ({ file, url: URL.createObjectURL(file) }));
-    if (kind === "photo") setPendingPhotos((prev) => [...prev, ...withUrls]);
-    else setPendingVideos((prev) => [...prev, ...withUrls]);
+    const setPhotos = target === "edit" ? setEditPendingPhotos : setPendingPhotos;
+    const setVideos = target === "edit" ? setEditPendingVideos : setPendingVideos;
+    if (kind === "photo") setPhotos((prev) => [...prev, ...withUrls]);
+    else setVideos((prev) => [...prev, ...withUrls]);
 
     const problems = [];
     if (wrongType.length > 0) problems.push(`${wrongType.length} file bukan ${ATTACHMENT_KINDS[kind].label.toLowerCase()} yang valid`);
     if (oversized.length > 0) problems.push(`${oversized.length} file lebih besar dari ${MAX_ATTACHMENT_MB}MB`);
     if (overCap > 0) problems.push(`${overCap} file dilewati (maks ${MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan)`);
-    if (problems.length > 0) setAttachError(`⚠ ${problems.join(" · ")}.`);
+    if (problems.length > 0) setAttachErr(`⚠ ${problems.join(" · ")}.`);
   }
 
-  function removePending(kind, idx) {
-    const setter = kind === "photo" ? setPendingPhotos : kind === "video" ? setPendingVideos : setPendingVoiceNotes;
+  function removePending(target, kind, idx) {
+    const setter = target === "edit"
+      ? (kind === "photo" ? setEditPendingPhotos : kind === "video" ? setEditPendingVideos : setEditPendingVoiceNotes)
+      : (kind === "photo" ? setPendingPhotos : kind === "video" ? setPendingVideos : setPendingVoiceNotes);
     setter((prev) => {
       const item = prev[idx];
       if (item?.url) URL.revokeObjectURL(item.url);
@@ -178,14 +236,24 @@ export default function JournalPage() {
   }
 
   // ---------------- attachments: record voice note ----------------
-  async function startRecording() {
-    setAttachError("");
-    if (pendingCount() >= MAX_ATTACHMENTS_PER_ENTRY) {
-      setAttachError(`⚠ Maksimal ${MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.`);
+  // Only one microphone recording can physically happen at a time, so
+  // this stays a single MediaRecorder implementation shared by both
+  // targets -- `target` (captured in onstop's own closure, not read back
+  // from state, so it can't go stale) just decides which pending list the
+  // finished blob lands in.
+  async function startRecording(target) {
+    const setAttachErr = target === "edit" ? setEditAttachError : setAttachError;
+    setAttachErr("");
+    if (isRecording) {
+      setAttachErr("⚠ Sedang merekam di catatan lain — selesaikan/hentikan dulu.");
+      return;
+    }
+    if (pendingCount(target) >= MAX_ATTACHMENTS_PER_ENTRY) {
+      setAttachErr(`⚠ Maksimal ${MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.`);
       return;
     }
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setAttachError("⚠ Browser ini tidak mendukung rekam suara.");
+      setAttachErr("⚠ Browser ini tidak mendukung rekam suara.");
       return;
     }
     try {
@@ -201,19 +269,21 @@ export default function JournalPage() {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         if (blob.size > MAX_ATTACHMENT_BYTES) {
-          setAttachError(`⚠ Rekaman terlalu besar (lebih dari ${MAX_ATTACHMENT_MB}MB) — coba rekam lebih singkat.`);
+          setAttachErr(`⚠ Rekaman terlalu besar (lebih dari ${MAX_ATTACHMENT_MB}MB) — coba rekam lebih singkat.`);
           return;
         }
         const url = URL.createObjectURL(blob);
-        setPendingVoiceNotes((prev) => [...prev, { blob, url, mimeType }]);
+        const setVoice = target === "edit" ? setEditPendingVoiceNotes : setPendingVoiceNotes;
+        setVoice((prev) => [...prev, { blob, url, mimeType }]);
       };
       recorder.start();
       mediaRecorderRef.current = recorder;
       setRecordSeconds(0);
       setIsRecording(true);
+      setRecordingTarget(target);
       recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
     } catch (e) {
-      setAttachError("⚠ Tidak bisa akses microphone. Izinkan akses mic dulu di pengaturan browser.");
+      setAttachErr("⚠ Tidak bisa akses microphone. Izinkan akses mic dulu di pengaturan browser.");
     }
   }
 
@@ -221,6 +291,7 @@ export default function JournalPage() {
     mediaRecorderRef.current?.stop();
     clearInterval(recordTimerRef.current);
     setIsRecording(false);
+    setRecordingTarget(null);
   }
 
   // ---------------- voice note transcription ----------------
@@ -229,19 +300,22 @@ export default function JournalPage() {
   // it's impossible to miss. Runs before the entry is saved — lets you
   // review/edit the tidied text (or just the raw transcript) and drop it
   // into the note field yourself, rather than silently rewriting your typing.
-  function dismissTranscribePrompt(idx) {
-    setPendingVoiceNotes((prev) => prev.map((v, i) => (i === idx ? { ...v, promptDismissed: true } : v)));
+  function dismissTranscribePrompt(target, idx) {
+    const setVoice = target === "edit" ? setEditPendingVoiceNotes : setPendingVoiceNotes;
+    setVoice((prev) => prev.map((v, i) => (i === idx ? { ...v, promptDismissed: true } : v)));
   }
 
-  async function transcribePendingVoice(idx) {
-    const voice = pendingVoiceNotes[idx];
+  async function transcribePendingVoice(target, idx) {
+    const voiceList = target === "edit" ? editPendingVoiceNotes : pendingVoiceNotes;
+    const setVoice = target === "edit" ? setEditPendingVoiceNotes : setPendingVoiceNotes;
+    const voice = voiceList[idx];
     if (!voice) return;
-    setPendingVoiceNotes((prev) => prev.map((v, i) => (
+    setVoice((prev) => prev.map((v, i) => (
       i === idx ? { ...v, promptDismissed: true, transcribing: true, transcribeError: "", transcript: "", tidiedNote: "" } : v
     )));
 
     function applyProgress(patch) {
-      setPendingVoiceNotes((prev) => prev.map((v, i) => (i === idx ? { ...v, ...patch } : v)));
+      setVoice((prev) => prev.map((v, i) => (i === idx ? { ...v, ...patch } : v)));
     }
 
     try {
@@ -294,13 +368,33 @@ export default function JournalPage() {
 
   // Appends rather than replaces — you might already be typing your own note
   // alongside the voice note, or combining transcripts from more than one.
-  function useTidiedNote(idx) {
-    const tidied = pendingVoiceNotes[idx]?.tidiedNote;
+  function useTidiedNote(target, idx) {
+    const voiceList = target === "edit" ? editPendingVoiceNotes : pendingVoiceNotes;
+    const tidied = voiceList[idx]?.tidiedNote;
     if (!tidied) return;
-    setNote((prev) => (prev.trim() ? `${prev.trim()}\n\n${tidied}` : tidied));
+    const setTargetNote = target === "edit" ? setEditNote : setNote;
+    setTargetNote((prev) => (prev.trim() ? `${prev.trim()}\n\n${tidied}` : tidied));
   }
 
   // ---------------- save ----------------
+  // Shared by handleSave (new entry, just-inserted id) and saveEditEntry
+  // (existing entry, no insert needed) -- upload to storage then insert
+  // the journal_attachments row; returns the row on success or null on
+  // either failure, caller decides how to count/report failures.
+  async function uploadAttachment(entryId, kind, fileOrBlob, fallbackName, mimeType) {
+    const path = attachmentPath(user.id, entryId, fileOrBlob.name || fallbackName);
+    const contentType = mimeType || fileOrBlob.type;
+    const { error: upErr } = await supabase.storage.from(JOURNAL_BUCKET).upload(path, fileOrBlob, { contentType });
+    if (upErr) return null;
+    const { data: attRow, error: attErr } = await supabase
+      .from("journal_attachments")
+      .insert({ user_id: user.id, entry_id: entryId, kind, storage_path: path, mime_type: contentType, size_bytes: fileOrBlob.size })
+      .select()
+      .maybeSingle();
+    if (attErr) return null;
+    return attRow;
+  }
+
   async function handleSave() {
     setError("");
     const trimmed = note.trim();
@@ -320,23 +414,14 @@ export default function JournalPage() {
     const savedAttachments = [];
     let failedCount = 0;
 
-    async function uploadOne(kind, fileOrBlob, fallbackName, mimeType) {
-      const path = attachmentPath(user.id, entry.id, fileOrBlob.name || fallbackName);
-      const contentType = mimeType || fileOrBlob.type;
-      const { error: upErr } = await supabase.storage.from(JOURNAL_BUCKET).upload(path, fileOrBlob, { contentType });
-      if (upErr) { failedCount++; return; }
-      const { data: attRow, error: attErr } = await supabase
-        .from("journal_attachments")
-        .insert({ user_id: user.id, entry_id: entry.id, kind, storage_path: path, mime_type: contentType, size_bytes: fileOrBlob.size })
-        .select()
-        .maybeSingle();
-      if (attErr) { failedCount++; return; }
-      savedAttachments.push(attRow);
+    async function uploadAndCollect(kind, fileOrBlob, fallbackName, mimeType) {
+      const row = await uploadAttachment(entry.id, kind, fileOrBlob, fallbackName, mimeType);
+      if (row) savedAttachments.push(row); else failedCount++;
     }
 
-    for (const p of pendingPhotos) await uploadOne("photo", p.file, "photo.jpg");
-    for (const v of pendingVideos) await uploadOne("video", v.file, "video.mp4");
-    for (const v of pendingVoiceNotes) await uploadOne("voice", v.blob, "voice-note.webm", v.mimeType);
+    for (const p of pendingPhotos) await uploadAndCollect("photo", p.file, "photo.jpg");
+    for (const v of pendingVideos) await uploadAndCollect("video", v.file, "video.mp4");
+    for (const v of pendingVoiceNotes) await uploadAndCollect("voice", v.blob, "voice-note.webm", v.mimeType);
 
     setSaving(false);
     const withUrls = await withSignedUrls(savedAttachments);
@@ -360,15 +445,25 @@ export default function JournalPage() {
   }
 
   // ---------------- edit an existing entry ----------------
+  function clearEditPendingAttachments() {
+    [...editPendingPhotos, ...editPendingVideos, ...editPendingVoiceNotes].forEach((p) => p.url && URL.revokeObjectURL(p.url));
+    setEditPendingPhotos([]);
+    setEditPendingVideos([]);
+    setEditPendingVoiceNotes([]);
+    setEditAttachError("");
+  }
+
   function startEditEntry(entry) {
     setEditingEntryId(entry.id);
     setEditDate(entry.entry_date);
     setEditMood(entry.mood);
     setEditNote(entry.note || "");
     setEditError("");
+    clearEditPendingAttachments(); // defensive -- should already be empty by now, see cancel/save below
   }
 
   function cancelEditEntry() {
+    clearEditPendingAttachments();
     setEditingEntryId(null);
     setEditError("");
   }
@@ -376,7 +471,8 @@ export default function JournalPage() {
   async function saveEditEntry(entry) {
     setEditError("");
     const trimmed = editNote.trim();
-    const hasAttachments = (entry.attachments || []).length > 0;
+    const hasAttachments = (entry.attachments || []).length > 0
+      || editPendingPhotos.length > 0 || editPendingVideos.length > 0 || editPendingVoiceNotes.length > 0;
     if (!trimmed && !hasAttachments) { setEditError("⚠ Tulis catatan dulu."); return; }
     if (!editDate) { setEditError("⚠ Pilih tanggal untuk catatan ini."); return; }
 
@@ -387,16 +483,39 @@ export default function JournalPage() {
       .eq("id", entry.id)
       .select()
       .maybeSingle();
+    if (updateErr) { setEditSaving(false); setEditError("⚠ " + updateErr.message); return; }
+
+    // Same upload-then-collect shape as handleSave, just against the
+    // entry's already-existing id instead of a fresh insert.
+    const savedAttachments = [];
+    let failedCount = 0;
+    async function uploadAndCollect(kind, fileOrBlob, fallbackName, mimeType) {
+      const row = await uploadAttachment(entry.id, kind, fileOrBlob, fallbackName, mimeType);
+      if (row) savedAttachments.push(row); else failedCount++;
+    }
+    for (const p of editPendingPhotos) await uploadAndCollect("photo", p.file, "photo.jpg");
+    for (const v of editPendingVideos) await uploadAndCollect("video", v.file, "video.mp4");
+    for (const v of editPendingVoiceNotes) await uploadAndCollect("voice", v.blob, "voice-note.webm", v.mimeType);
     setEditSaving(false);
-    if (updateErr) { setEditError("⚠ " + updateErr.message); return; }
 
     // Merge into the existing entry rather than replacing it outright — the
     // update+select above only returns journal_entries columns, not the
-    // attachments array this list item also carries.
+    // attachments array this list item also carries. New attachments (if
+    // any) get appended the same way handleSave appends them for a fresh entry.
+    const withUrls = await withSignedUrls(savedAttachments);
     setEntries((prev) => prev
-      .map((e) => (e.id === entry.id ? { ...e, entry_date: data.entry_date, mood: data.mood, note: data.note } : e))
+      .map((e) => (e.id === entry.id
+        ? { ...e, entry_date: data.entry_date, mood: data.mood, note: data.note, attachments: [...(e.attachments || []), ...withUrls] }
+        : e))
       .sort(sortEntries));
-    setEditingEntryId(null);
+
+    clearEditPendingAttachments();
+    // A partial attachment failure keeps the edit form open (same
+    // entry/note already saved either way) so the warning stays visible —
+    // editError renders inside that form, which unmounts once
+    // editingEntryId clears.
+    if (failedCount > 0) setEditError(`⚠ Perubahan tersimpan, tapi ${failedCount} lampiran gagal diunggah.`);
+    else setEditingEntryId(null);
   }
 
   async function handleDeleteAttachment(entryId, attachment) {
@@ -422,6 +541,135 @@ export default function JournalPage() {
         setConfirmingAttachmentId((cur) => (cur === attachment.id ? null : cur));
       }, 3000);
     }
+  }
+
+  // Shared by the new-entry composer and the edit form -- same attach
+  // row (photo/video/record), pending-attachment previews, and voice-note
+  // transcription UI, just pointed at whichever target's state via the
+  // parameterized handlers above. Defined once so the two call sites
+  // (below) can't drift out of sync with each other.
+  function renderAttachSection(target) {
+    const attachErr = target === "edit" ? editAttachError : attachError;
+    const photos = target === "edit" ? editPendingPhotos : pendingPhotos;
+    const videos = target === "edit" ? editPendingVideos : pendingVideos;
+    const voiceNotes = target === "edit" ? editPendingVoiceNotes : pendingVoiceNotes;
+    return (
+      <>
+        <div className="attach-row">
+          <label className="attach-btn">
+            🖼️ Foto
+            <input
+              type="file" accept="image/*" multiple
+              onChange={(e) => { addPendingFiles(target, "photo", e.target.files); e.target.value = ""; }}
+            />
+          </label>
+          <label className="attach-btn">
+            🎬 Video
+            <input
+              type="file" accept="video/*" multiple
+              onChange={(e) => { addPendingFiles(target, "video", e.target.files); e.target.value = ""; }}
+            />
+          </label>
+          {!isRecording ? (
+            <button type="button" className="attach-btn" onClick={() => startRecording(target)}>🎙️ Rekam voice note</button>
+          ) : recordingTarget === target ? (
+            <button type="button" className="attach-btn recording" onClick={stopRecording}>
+              ⏹ Berhenti · {formatSeconds(recordSeconds)}
+            </button>
+          ) : (
+            <button type="button" className="attach-btn" disabled title="Sedang merekam di catatan lain">🎙️ Rekam voice note</button>
+          )}
+        </div>
+        <div className="attach-hint">
+          Foto/video maks {MAX_ATTACHMENT_MB}MB per file, maks {MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.
+          Voice note butuh izin akses mic browser dan otomatis berhenti di {Math.round(MAX_RECORDING_SECONDS / 60)} menit.
+        </div>
+
+        {attachErr && <div className="error-box">{attachErr}</div>}
+
+        {(photos.length > 0 || videos.length > 0 || voiceNotes.length > 0) && (
+          <div className="pending-attachments">
+            {photos.map((p, i) => (
+              <div className="pending-item" key={`${target}-p${i}`}>
+                <img src={p.url} alt="" />
+                <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "photo", i)}>✕</button>
+              </div>
+            ))}
+            {videos.map((v, i) => (
+              <div className="pending-item" key={`${target}-v${i}`}>
+                <video src={v.url} muted />
+                <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "video", i)}>✕</button>
+              </div>
+            ))}
+            {voiceNotes.map((v, i) => (
+              <div className="pending-item pending-voice" key={`${target}-a${i}`}>
+                <div className="pending-voice-row">
+                  <audio controls src={v.url} />
+                  <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "voice", i)}>✕</button>
+                </div>
+
+                {/* Right after recording stops: an unmissable prompt, not a
+                    button sitting quietly among the others. */}
+                {!v.promptDismissed && !v.transcribing && !v.tidiedNote && (
+                  <div className="transcribe-prompt">
+                    <p>Mau ditranskrip jadi draf jurnal?</p>
+                    <div className="transcribe-prompt-actions">
+                      <button type="button" className="transcribe-use-btn" onClick={() => transcribePendingVoice(target, i)}>
+                        Ya, transkrip
+                      </button>
+                      <button type="button" className="manual-form-cancel" onClick={() => dismissTranscribePrompt(target, i)}>
+                        Tidak, nanti saja
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Declined earlier, changed your mind — the button stays available. */}
+                {v.promptDismissed && !v.transcribing && !v.tidiedNote && !v.transcribeError && (
+                  <button type="button" className="transcribe-btn" onClick={() => transcribePendingVoice(target, i)}>
+                    📝 Transkrip & rapikan jadi jurnal
+                  </button>
+                )}
+
+                {/* Streams in live — transcript fills in first, then the
+                    tidied draft right after (see streamTranscribeVoiceNote). */}
+                {v.transcribing && (
+                  <div className="transcript-preview streaming">
+                    <p className="transcript-preview-label">Mentranskrip…</p>
+                    {v.tidiedNote ? (
+                      <p className="transcript-preview-text">{v.tidiedNote}<span className="chat-cursor" /></p>
+                    ) : (
+                      <p className="transcript-preview-text muted">{v.transcript}<span className="chat-cursor" /></p>
+                    )}
+                  </div>
+                )}
+
+                {v.transcribeError && (
+                  <div className="error-box">
+                    {v.transcribeError}{" "}
+                    <button type="button" className="retry-inline-btn" onClick={() => transcribePendingVoice(target, i)}>Coba lagi</button>
+                  </div>
+                )}
+
+                {!v.transcribing && v.tidiedNote && (
+                  <div className="transcript-preview">
+                    <p className="transcript-preview-label">Draf jurnal dari voice note ini:</p>
+                    <p className="transcript-preview-text">{v.tidiedNote}</p>
+                    <details className="transcript-raw">
+                      <summary>Lihat transkrip apa adanya</summary>
+                      <p>{v.transcript || "(tidak ada ucapan yang dikenali)"}</p>
+                    </details>
+                    <button type="button" className="transcribe-use-btn" onClick={() => useTidiedNote(target, i)}>
+                      Gunakan sebagai catatan
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    );
   }
 
   if (loading) return <div className="center-loading">Memuat data…</div>;
@@ -488,117 +736,7 @@ export default function JournalPage() {
               onChange={(e) => setNote(e.target.value)}
             />
 
-            <div className="attach-row">
-              <label className="attach-btn">
-                🖼️ Foto
-                <input
-                  type="file" accept="image/*" multiple
-                  onChange={(e) => { addPendingFiles("photo", e.target.files); e.target.value = ""; }}
-                />
-              </label>
-              <label className="attach-btn">
-                🎬 Video
-                <input
-                  type="file" accept="video/*" multiple
-                  onChange={(e) => { addPendingFiles("video", e.target.files); e.target.value = ""; }}
-                />
-              </label>
-              {!isRecording ? (
-                <button type="button" className="attach-btn" onClick={startRecording}>🎙️ Rekam voice note</button>
-              ) : (
-                <button type="button" className="attach-btn recording" onClick={stopRecording}>
-                  ⏹ Berhenti · {formatSeconds(recordSeconds)}
-                </button>
-              )}
-            </div>
-            <div className="attach-hint">
-              Foto/video maks {MAX_ATTACHMENT_MB}MB per file, maks {MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.
-              Voice note butuh izin akses mic browser dan otomatis berhenti di {Math.round(MAX_RECORDING_SECONDS / 60)} menit.
-            </div>
-
-            {attachError && <div className="error-box">{attachError}</div>}
-
-            {(pendingPhotos.length > 0 || pendingVideos.length > 0 || pendingVoiceNotes.length > 0) && (
-              <div className="pending-attachments">
-                {pendingPhotos.map((p, i) => (
-                  <div className="pending-item" key={`p${i}`}>
-                    <img src={p.url} alt="" />
-                    <button type="button" className="pending-remove-btn" onClick={() => removePending("photo", i)}>✕</button>
-                  </div>
-                ))}
-                {pendingVideos.map((v, i) => (
-                  <div className="pending-item" key={`v${i}`}>
-                    <video src={v.url} muted />
-                    <button type="button" className="pending-remove-btn" onClick={() => removePending("video", i)}>✕</button>
-                  </div>
-                ))}
-                {pendingVoiceNotes.map((v, i) => (
-                  <div className="pending-item pending-voice" key={`a${i}`}>
-                    <div className="pending-voice-row">
-                      <audio controls src={v.url} />
-                      <button type="button" className="pending-remove-btn" onClick={() => removePending("voice", i)}>✕</button>
-                    </div>
-
-                    {/* Right after recording stops: an unmissable prompt, not a
-                        button sitting quietly among the others. */}
-                    {!v.promptDismissed && !v.transcribing && !v.tidiedNote && (
-                      <div className="transcribe-prompt">
-                        <p>Mau ditranskrip jadi draf jurnal?</p>
-                        <div className="transcribe-prompt-actions">
-                          <button type="button" className="transcribe-use-btn" onClick={() => transcribePendingVoice(i)}>
-                            Ya, transkrip
-                          </button>
-                          <button type="button" className="manual-form-cancel" onClick={() => dismissTranscribePrompt(i)}>
-                            Tidak, nanti saja
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Declined earlier, changed your mind — the button stays available. */}
-                    {v.promptDismissed && !v.transcribing && !v.tidiedNote && !v.transcribeError && (
-                      <button type="button" className="transcribe-btn" onClick={() => transcribePendingVoice(i)}>
-                        📝 Transkrip & rapikan jadi jurnal
-                      </button>
-                    )}
-
-                    {/* Streams in live — transcript fills in first, then the
-                        tidied draft right after (see streamTranscribeVoiceNote). */}
-                    {v.transcribing && (
-                      <div className="transcript-preview streaming">
-                        <p className="transcript-preview-label">Mentranskrip…</p>
-                        {v.tidiedNote ? (
-                          <p className="transcript-preview-text">{v.tidiedNote}<span className="chat-cursor" /></p>
-                        ) : (
-                          <p className="transcript-preview-text muted">{v.transcript}<span className="chat-cursor" /></p>
-                        )}
-                      </div>
-                    )}
-
-                    {v.transcribeError && (
-                      <div className="error-box">
-                        {v.transcribeError}{" "}
-                        <button type="button" className="retry-inline-btn" onClick={() => transcribePendingVoice(i)}>Coba lagi</button>
-                      </div>
-                    )}
-
-                    {!v.transcribing && v.tidiedNote && (
-                      <div className="transcript-preview">
-                        <p className="transcript-preview-label">Draf jurnal dari voice note ini:</p>
-                        <p className="transcript-preview-text">{v.tidiedNote}</p>
-                        <details className="transcript-raw">
-                          <summary>Lihat transkrip apa adanya</summary>
-                          <p>{v.transcript || "(tidak ada ucapan yang dikenali)"}</p>
-                        </details>
-                        <button type="button" className="transcribe-use-btn" onClick={() => useTidiedNote(i)}>
-                          Gunakan sebagai catatan
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            {renderAttachSection("compose")}
 
             {error && <div className="error-box">{error}</div>}
 
@@ -615,10 +753,12 @@ export default function JournalPage() {
           ) : (
             entries.map((e) => {
               const m = moodMeta(e.mood);
+              const weekTrimester = weekTrimesterLabel(hpht, e.entry_date);
               return (
                 <div className="journal-entry" key={e.id}>
                   <div className="journal-entry-header">
                     <span className="journal-entry-date">{e.entry_date}</span>
+                    {weekTrimester && <span className="journal-entry-week">{weekTrimester}</span>}
                     {m && <span className="journal-entry-mood">{m.emoji} {m.label}</span>}
                     <div className="journal-entry-actions">
                       {editingEntryId !== e.id && (
@@ -651,6 +791,7 @@ export default function JournalPage() {
                         className="journal-textarea" rows={4}
                         value={editNote} onChange={(ev) => setEditNote(ev.target.value)}
                       />
+                      {renderAttachSection("edit")}
                       {editError && <div className="error-box">{editError}</div>}
                       <div className="manual-form-actions">
                         <button className="manual-form-save" onClick={() => saveEditEntry(e)} disabled={editSaving}>
