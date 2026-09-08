@@ -1,0 +1,8 @@
+{
+  "crons": [
+    { "path": "/api/cron/reminders?kind=morning", "schedule": "0 0 * * *" },
+    { "path": "/api/cron/reminders?kind=lunch", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/reminders?kind=dinner", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/reminders?kind=night", "schedule": "30 14 * * *" }
+  ]
+}

@@ -9,6 +9,7 @@ import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
   gestationalProgressPct, formatDateID, FULL_TERM_WEEKS,
 } from "@/lib/pregnancy";
+import { isPushSupported, getPushState, subscribeToPush, unsubscribeFromPush } from "@/lib/push";
 
 const GENDER_META = {
   boy: { label: "Laki-laki", color: "#7FA9C7" },
@@ -44,6 +45,20 @@ export default function ProfilePage() {
   const [hphtSaving, setHphtSaving] = useState(false);
   const [hphtError, setHphtError] = useState("");
 
+  // nama ibu — dipakai untuk sapaan personal di notifikasi Web Push (lihat
+  // app/api/cron/reminders/route.js), bukan cuma kosmetik.
+  const [name, setName] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState("");
+
+  // notifikasi push (Web Push) — lihat lib/push.js
+  const [pushSupported, setPushSupported] = useState(true); // asumsi optimis sampai dicek di client
+  const [pushPermission, setPushPermission] = useState("default");
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState("");
+
   // calon nama bayi
   const [names, setNames] = useState([]);
   const [filter, setFilter] = useState("all");
@@ -67,6 +82,8 @@ export default function ProfilePage() {
         profile = created;
       }
       setHpht(profile?.hpht || null);
+      setName(profile?.name || "");
+      setNameDraft(profile?.name || "");
 
       const { data: nameRows } = await supabase
         .from("baby_names")
@@ -83,6 +100,64 @@ export default function ProfilePage() {
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/login");
+  }
+
+  // refresh push permission/subscription state on mount -- runs once, client-
+  // only (Notification/PushManager don't exist during SSR).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = isPushSupported();
+      setPushSupported(supported);
+      if (!supported) return;
+      const state = await getPushState();
+      if (cancelled) return;
+      setPushPermission(state.permission);
+      setPushSubscribed(state.subscribed);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ---------------- nama ----------------
+  async function saveName() {
+    setNameError("");
+    const trimmed = nameDraft.trim();
+    setNameSaving(true);
+    const { error } = await supabase.from("profiles").upsert({ user_id: user.id, name: trimmed || null }, { onConflict: "user_id" });
+    setNameSaving(false);
+    if (error) { setNameError("⚠ " + error.message); return; }
+    setName(trimmed);
+  }
+
+  // ---------------- notifikasi push ----------------
+  async function handleEnablePush() {
+    setPushError("");
+    setPushBusy(true);
+    try {
+      await subscribeToPush();
+      setPushSubscribed(true);
+      setPushPermission("granted");
+    } catch (e) {
+      setPushError("⚠ " + e.message);
+      // permission could've ended up "denied" even though subscribe threw --
+      // re-read so the panel reflects the browser's actual state either way.
+      if (typeof Notification !== "undefined") setPushPermission(Notification.permission);
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function handleDisablePush() {
+    setPushError("");
+    setPushBusy(true);
+    try {
+      await unsubscribeFromPush();
+      setPushSubscribed(false);
+    } catch (e) {
+      setPushError("⚠ " + e.message);
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   // ---------------- usia kehamilan ----------------
@@ -191,6 +266,64 @@ export default function ProfilePage() {
       </div>
 
       <div className="bloom-grid">
+        {/* Nama — dipakai untuk sapaan personal di notifikasi Web Push */}
+        <div className="panel full">
+          <h2>Nama</h2>
+          <p className="format-hint" style={{ marginTop: 0 }}>
+            Dipakai buat menyapa kamu secara personal di notifikasi pengingat Bloom (mis. "Pagi,
+            Sarah!"). Boleh dikosongkan — notifikasinya tetap jalan pakai sapaan umum.
+          </p>
+          <div className="manual-form-row">
+            <input
+              type="text" placeholder="Nama kamu (mis. Sarah)"
+              value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+            />
+            <button className="manual-form-save" onClick={saveName} disabled={nameSaving || nameDraft.trim() === name}>
+              {nameSaving ? "Menyimpan…" : "Simpan"}
+            </button>
+          </div>
+          {nameError && <div className="error-box">{nameError}</div>}
+        </div>
+
+        {/* Notifikasi — Web Push (lihat lib/push.js + app/api/cron/reminders) */}
+        <div className="panel full">
+          <h2>Notifikasi</h2>
+          {!pushSupported ? (
+            <p className="format-hint" style={{ marginTop: 0 }}>
+              ⚠ Push notification belum didukung di browser ini.
+            </p>
+          ) : (
+            <>
+              <p className="format-hint" style={{ marginTop: 0 }}>
+                Kalau diaktifkan, Bloom mengirim 4 pengingat tiap hari: pagi (sapaan + semangat/fakta
+                kehamilan), siang (ajakan makan siang + fakta gizi), malam pukul 19:00 (kalau menu
+                atau vitamin hari ini belum dicatat), dan menjelang tidur (pengingat istirahat +
+                afirmasi). Di iPhone, tambahkan Bloom ke Layar Utama dulu (Safari → Share → Add to
+                Home Screen) — notifikasi cuma bisa muncul lewat itu di iOS 16.4 ke atas.
+              </p>
+              {pushPermission === "denied" && (
+                <div className="error-box">
+                  ⚠ Izin notifikasi ditolak di browser ini. Aktifkan lagi lewat pengaturan situs
+                  (biasanya ikon gembok di address bar), lalu muat ulang halaman ini.
+                </div>
+              )}
+              {pushSubscribed ? (
+                <button className="manual-form-cancel" onClick={handleDisablePush} disabled={pushBusy}>
+                  {pushBusy ? "Memproses…" : "Matikan pengingat"}
+                </button>
+              ) : (
+                <button
+                  className="manual-form-save" onClick={handleEnablePush}
+                  disabled={pushBusy || pushPermission === "denied"}
+                >
+                  {pushBusy ? "Memproses…" : "Aktifkan pengingat"}
+                </button>
+              )}
+              {pushError && <div className="error-box">{pushError}</div>}
+            </>
+          )}
+        </div>
+
         {/* Usia kehamilan (dari HPHT) + progress tracker */}
         <div className="panel full">
           <h2>Usia kehamilan</h2>
