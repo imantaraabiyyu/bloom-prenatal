@@ -65,10 +65,31 @@ WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
 2. Tambahkan ke `.env.local` (lokal) **dan** Vercel → Project Settings →
    Environment Variables (produksi):
    ```
-   GEMINI_API_KEY=...               # dari langkah 1
-   GEMINI_MODEL=gemini-3.6-flash    # opsional, ini nilai defaultnya — Google kadang
-                                    # mem-pensiunkan model lama, ganti nilai ini kalau
-                                    # suatu saat error "model ... no longer available"
+   GEMINI_API_KEY=...                       # dari langkah 1
+
+   # Ada 2 "tier" model, masing-masing opsional (nilai di bawah ini defaultnya):
+   # - tier "chat" dipakai tab Chat + transkrip Jurnal (butuh baca foto/audio,
+   #   jadi selalu model paling mumpuni)
+   # - tier "low" dipakai notifikasi cron (generate kalimat/fakta tambahan,
+   #   teks doang, jadi model termurah/tercepat cukup)
+   GEMINI_CHAT_MODEL=gemini-2.5-pro          # tier "chat"
+   GEMINI_CHAT_FALLBACK_MODELS=              # opsional, daftar model cadangan tier "chat"
+                                             # dipisah koma, dicoba urut kalau yang di atas kena
+                                             # limit kuota (429) — mis. gemini-3.1-pro-preview
+   GEMINI_MODEL=gemini-3.5-flash-lite        # tier "low" — PERHATIAN: nama env var ini dulu
+                                             # dipakai bareng buat SEMUA panggilan Gemini
+                                             # (termasuk Chat); sekarang cuma tier "low"
+   GEMINI_FALLBACK_MODELS=                   # opsional, daftar model cadangan tier "low",
+                                             # format sama seperti GEMINI_CHAT_FALLBACK_MODELS
+
+   # Kalau tier "chat" di atas kena limit kuota di SEMUA modelnya (jarang
+   # terjadi), otomatis jatuh ke tier "low" sebagai jalan terakhir — supaya
+   # tetap dapat balasan daripada gagal total — dan balasannya dikasih catatan
+   # kecil kalau itu dari model cadangan yang lebih sederhana, jadi jangan
+   # langsung disimpan mentah-mentah, cek ulang dulu.
+
+   # Google kadang mem-pensiunkan model lama — ganti nilai di atas kalau suatu
+   # saat muncul error "model ... no longer available".
    ```
 3. Kalau belum, jalankan ulang `supabase/schema.sql` (lihat langkah 2 di atas)
    — aman dijalankan ulang, tidak menghapus data yang sudah ada.
