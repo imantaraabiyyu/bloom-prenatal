@@ -5,6 +5,10 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import HelpTip from "@/components/HelpTip";
+import {
+  Home, NotebookText, MessageCircle, User, ImagePlus, Video, Mic, Square,
+  FileText, X, Check, Sprout, Pencil, AlertTriangle,
+} from "lucide-react";
 import { todayISO } from "@/lib/nutrition";
 import { computeGestationalAge, trimesterForWeeks } from "@/lib/pregnancy";
 import {
@@ -558,27 +562,27 @@ export default function JournalPage() {
       <>
         <div className="attach-row">
           <label className="attach-btn">
-            🖼️ Foto
+            <ImagePlus size={15} /> Foto
             <input
               type="file" accept="image/*" multiple
               onChange={(e) => { addPendingFiles(target, "photo", e.target.files); e.target.value = ""; }}
             />
           </label>
           <label className="attach-btn">
-            🎬 Video
+            <Video size={15} /> Video
             <input
               type="file" accept="video/*" multiple
               onChange={(e) => { addPendingFiles(target, "video", e.target.files); e.target.value = ""; }}
             />
           </label>
           {!isRecording ? (
-            <button type="button" className="attach-btn" onClick={() => startRecording(target)}>🎙️ Rekam voice note</button>
+            <button type="button" className="attach-btn" onClick={() => startRecording(target)}><Mic size={15} /> Rekam voice note</button>
           ) : recordingTarget === target ? (
             <button type="button" className="attach-btn recording" onClick={stopRecording}>
-              ⏹ Berhenti · {formatSeconds(recordSeconds)}
+              <Square size={13} /> Berhenti · {formatSeconds(recordSeconds)}
             </button>
           ) : (
-            <button type="button" className="attach-btn" disabled title="Sedang merekam di catatan lain">🎙️ Rekam voice note</button>
+            <button type="button" className="attach-btn" disabled title="Sedang merekam di catatan lain"><Mic size={15} /> Rekam voice note</button>
           )}
         </div>
         <div className="attach-hint">
@@ -596,20 +600,20 @@ export default function JournalPage() {
             {photos.map((p, i) => (
               <div className="pending-item" key={`${target}-p${i}`}>
                 <img src={p.url} alt="" />
-                <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "photo", i)}>✕</button>
+                <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "photo", i)}><X size={11} /></button>
               </div>
             ))}
             {videos.map((v, i) => (
               <div className="pending-item" key={`${target}-v${i}`}>
                 <video src={v.url} muted />
-                <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "video", i)}>✕</button>
+                <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "video", i)}><X size={11} /></button>
               </div>
             ))}
             {voiceNotes.map((v, i) => (
               <div className="pending-item pending-voice" key={`${target}-a${i}`}>
                 <div className="pending-voice-row">
                   <audio controls src={v.url} />
-                  <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "voice", i)}>✕</button>
+                  <button type="button" className="pending-remove-btn" onClick={() => removePending(target, "voice", i)}><X size={11} /></button>
                 </div>
 
                 {/* Right after recording stops: an unmissable prompt, not a
@@ -631,7 +635,7 @@ export default function JournalPage() {
                 {/* Declined earlier, changed your mind — the button stays available. */}
                 {v.promptDismissed && !v.transcribing && !v.tidiedNote && !v.transcribeError && (
                   <button type="button" className="transcribe-btn" onClick={() => transcribePendingVoice(target, i)}>
-                    📝 Transkrip & rapikan jadi jurnal
+                    <FileText size={13} /> Transkrip & rapikan jadi jurnal
                   </button>
                 )}
 
@@ -686,10 +690,10 @@ export default function JournalPage() {
           <span className="user-name">{user?.email}</span>
         </div>
         <div className="topbar-nav">
-          <Link href="/dashboard" className="nav-link">Dashboard</Link>
-          <Link href="/dashboard/journal" className="nav-link active">Jurnal</Link>
-          <Link href="/dashboard/chat" className="nav-link">Chat</Link>
-          <Link href="/dashboard/profile" className="nav-link">Profil</Link>
+          <Link href="/dashboard" className="nav-link"><Home size={19} /><span>Dashboard</span></Link>
+          <Link href="/dashboard/journal" className="nav-link active"><NotebookText size={19} /><span>Jurnal</span></Link>
+          <Link href="/dashboard/chat" className="nav-link"><MessageCircle size={19} /><span>Chat</span></Link>
+          <Link href="/dashboard/profile" className="nav-link"><User size={19} /><span>Profil</span></Link>
         </div>
         <button className="btn-ghost" onClick={handleLogout}>Keluar</button>
       </div>
@@ -727,7 +731,7 @@ export default function JournalPage() {
                   onClick={() => setMood((prev) => (prev === m.key ? null : m.key))}
                   title={m.label}
                 >
-                  <span>{m.emoji}</span> {m.label}
+                  <m.icon size={15} /> {m.label}
                 </button>
               ))}
             </div>
@@ -766,9 +770,9 @@ export default function JournalPage() {
                     {m && <span className="journal-entry-mood">{m.emoji} {m.label}</span>}
                     <div className="journal-entry-actions">
                       {editingEntryId !== e.id && (
-                        <button type="button" className="journal-entry-edit" title="Ubah catatan ini" onClick={() => startEditEntry(e)}>✏️</button>
+                        <button type="button" className="journal-entry-edit" title="Ubah catatan ini" onClick={() => startEditEntry(e)}><Pencil size={13} /></button>
                       )}
-                      <ConfirmButton className="journal-entry-remove" title="Hapus catatan ini" onConfirm={() => handleDelete(e)}>✕</ConfirmButton>
+                      <ConfirmButton className="journal-entry-remove" title="Hapus catatan ini" onConfirm={() => handleDelete(e)}><X size={15} /></ConfirmButton>
                     </div>
                   </div>
 
@@ -787,7 +791,7 @@ export default function JournalPage() {
                             key={mm.key} type="button" className={`mood-btn ${editMood === mm.key ? "active" : ""}`}
                             onClick={() => setEditMood((prev) => (prev === mm.key ? null : mm.key))} title={mm.label}
                           >
-                            <span>{mm.emoji}</span> {mm.label}
+                            <mm.icon size={15} /> {mm.label}
                           </button>
                         ))}
                       </div>
@@ -824,7 +828,7 @@ export default function JournalPage() {
                             className={`entry-attachment-remove ${confirmingAttachmentId === a.id ? "confirming" : ""}`}
                             title={confirmingAttachmentId === a.id ? "Klik sekali lagi untuk menghapus" : "Hapus lampiran ini"}
                             onClick={() => handleAttachmentRemoveClick(e.id, a)}
-                          >{confirmingAttachmentId === a.id ? "✓" : "✕"}</button>
+                          >{confirmingAttachmentId === a.id ? <Check size={11} /> : <X size={11} />}</button>
                         </div>
                       ))}
                     </div>

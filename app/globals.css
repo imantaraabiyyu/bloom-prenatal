@@ -347,7 +347,7 @@ button, input { font-family: inherit; }
 .pending-remove-btn:hover { background: var(--rose); color: #2B1B2E; }
 
 /* ---------- Voice note transcription (Jurnal) ---------- */
-.transcribe-btn { align-self: flex-start; background: none; border: 1.5px dashed rgba(243,237,233,0.28); color: var(--lilac); font-size: 12px; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+.transcribe-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; background: none; border: 1.5px dashed rgba(243,237,233,0.28); color: var(--lilac); font-size: 12px; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
 .transcribe-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .transcribe-btn:disabled { opacity: .6; cursor: default; }
 .transcript-preview { background: rgba(0,0,0,0.18); border: 1px solid rgba(243,237,233,0.1); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
