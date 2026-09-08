@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
-import { NUTRIENT_ORDER, NUTRIENT_META, todayISO } from "@/lib/nutrition";
+import { NUTRIENT_ORDER, NUTRIENT_META, todayISO, vitaminItemToRow } from "@/lib/nutrition";
 
 // Downscales a photo client-side before it ever leaves the browser — phone
 // camera photos can be 5-10MB+, which is both slow to upload and pushes
@@ -44,10 +44,27 @@ function formatAnalysisText(result) {
   return `🍽️ *${result.meal}*\n${detail}\n\n💬 ${result.reply}`;
 }
 
+// Vitamin-category counterpart of formatAnalysisText above — one line per
+// detected item (name + nutrient/extra_nutrients detail), followed by the
+// shared `reply`. `extra_nutrients` here is still the raw {label,unit,value}
+// array lib/gemini.js's sanitizeChatTurnResult returns, not yet the
+// slug-keyed map vitaminItemToRow (lib/nutrition.js) builds for the DB row.
+function formatVitaminAnalysisText(result) {
+  const lines = (result.vitamins || []).map((v) => {
+    const detail = [
+      ...NUTRIENT_ORDER.filter((n) => v[n] > 0).map((n) => `${NUTRIENT_META[n].label} ${v[n]}${NUTRIENT_META[n].unit}`),
+      ...(v.extra_nutrients || []).map((e) => `${e.label} ${e.value}${e.unit || ""}`),
+    ].join(" · ");
+    return `• *${v.name}*${detail ? ` — ${detail}` : ""}`;
+  });
+  return `💊 *Vitamin terdeteksi:*\n${lines.join("\n")}\n\n💬 ${result.reply}`;
+}
+
 // One entry per past turn, used as Gemini's conversation context — never
 // includes past photos (those aren't stored, see chat_messages in
 // supabase/schema.sql), just a placeholder so the model knows one was sent.
 function toHistoryEntry(m) {
+  if (m.analysis?.category === "vitamin") return { role: m.role, text: formatVitaminAnalysisText(m.analysis) };
   if (m.analysis) return { role: m.role, text: formatAnalysisText(m.analysis) };
   if (m.text) return { role: m.role, text: m.text };
   if (m.hadImage) return { role: m.role, text: "(mengirim foto makanan)" };
@@ -237,10 +254,13 @@ export default function ChatPage() {
         await saveMessage({ role: "assistant", text: `⚠ ${streamError}`, had_image: false });
       } else if (!finalResult) {
         await saveMessage({ role: "assistant", text: "⚠ Ada gangguan, coba lagi ya.", had_image: false });
-      } else if (finalResult.is_log && finalResult.meal) {
-        // Saved as analysis only — the "Simpan ke Dashboard" button (below)
-        // is what actually inserts it into `meals`, so nothing's logged
-        // until the user confirms it looks right.
+      } else if (
+        (finalResult.category === "food" && finalResult.meal) ||
+        (finalResult.category === "vitamin" && finalResult.vitamins?.length > 0)
+      ) {
+        // Saved as analysis only — the "Simpan ke Dashboard" button(s) below
+        // are what actually insert into `meals`/`vitamins`, so nothing's
+        // logged until the user confirms it looks right.
         await saveMessage({ role: "assistant", had_image: false, analysis: finalResult });
       } else {
         await saveMessage({ role: "assistant", had_image: false, text: finalResult.reply || "…" });
@@ -273,6 +293,58 @@ export default function ChatPage() {
     await supabase.from("chat_messages").update({ saved_meal_id: null }).eq("id", msgId);
   }
 
+  // Applies `updater` to message `msgId`'s analysis.vitamins[itemIndex] and
+  // returns the updated full `analysis` object so the caller can persist it
+  // in one shot — chat_messages has no per-vitamin-item column (unlike
+  // meals' single saved_meal_id), since one turn can now save more than one
+  // vitamin, so the whole jsonb `analysis` blob is what's written back to
+  // mark one item saved/undone. No schema change needed.
+  function updateVitaminItemLocal(msgId, itemIndex, updater) {
+    let updatedAnalysis = null;
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== msgId || !m.analysis?.vitamins) return m;
+      const vitamins = m.analysis.vitamins.map((v, i) => (i === itemIndex ? updater(v) : v));
+      updatedAnalysis = { ...m.analysis, vitamins };
+      return { ...m, analysis: updatedAnalysis };
+    }));
+    return updatedAnalysis;
+  }
+
+  // Saving/error state is keyed by item index on the message itself (not a
+  // single shared flag) so multiple "Simpan" buttons within one vitamin
+  // reply can be clicked independently without interfering with each other.
+  async function saveVitaminItemToDashboard(msgId, itemIndex, item) {
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? {
+      ...m,
+      vitaminSaving: { ...(m.vitaminSaving || {}), [itemIndex]: true },
+      vitaminErrors: { ...(m.vitaminErrors || {}), [itemIndex]: "" },
+    } : m)));
+    const row = vitaminItemToRow(item, user.id);
+    const { data: saved, error } = await supabase.from("vitamins").insert(row).select().maybeSingle();
+    if (error) {
+      setMessages((prev) => prev.map((m) => (m.id === msgId ? {
+        ...m,
+        vitaminSaving: { ...(m.vitaminSaving || {}), [itemIndex]: false },
+        vitaminErrors: { ...(m.vitaminErrors || {}), [itemIndex]: "⚠ Gagal menyimpan, coba lagi." },
+      } : m)));
+      return;
+    }
+    const updatedAnalysis = updateVitaminItemLocal(msgId, itemIndex, (v) => ({ ...v, saved_vitamin_id: saved.id }));
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? {
+      ...m, vitaminSaving: { ...(m.vitaminSaving || {}), [itemIndex]: false },
+    } : m)));
+    if (updatedAnalysis) await supabase.from("chat_messages").update({ analysis: updatedAnalysis }).eq("id", msgId);
+  }
+
+  async function undoSavedVitaminItem(msgId, itemIndex, vitaminId) {
+    const updatedAnalysis = updateVitaminItemLocal(msgId, itemIndex, (v) => {
+      const { saved_vitamin_id, ...rest } = v;
+      return { ...rest, undone: true };
+    });
+    await supabase.from("vitamins").delete().eq("id", vitaminId);
+    if (updatedAnalysis) await supabase.from("chat_messages").update({ analysis: updatedAnalysis }).eq("id", msgId);
+  }
+
   async function clearHistory() {
     setMessages([]);
     await supabase.from("chat_messages").delete().eq("user_id", user.id);
@@ -300,8 +372,9 @@ export default function ChatPage() {
         <p className="bloom-eyebrow">Chat gizi · AI</p>
         <h1 className="bloom-title">Chat</h1>
         <p className="bloom-sub">
-          Ngobrol santai soal kehamilan & gizi, atau ceritakan/kirim foto makananmu — kalau itu menu
-          yang mau dicatat, Bloom akan menganalisis gizinya dan kamu tinggal simpan ke menu hari ini.
+          Ngobrol santai soal kehamilan & gizi, ceritakan/kirim foto makananmu, atau foto label
+          vitamin/suplemen (dari kemasan atau resep dokter) dan label gizi kemasan makanan/minuman —
+          Bloom akan menganalisisnya dan kamu tinggal simpan ke Dashboard.
         </p>
       </div>
 
@@ -334,22 +407,51 @@ export default function ChatPage() {
                       {m.imageUrl && <img className="chat-bubble-image" src={m.imageUrl} alt="" />}
                       {!m.imageUrl && m.hadImage && <div className="chat-photo-placeholder">📷 Foto (tidak disimpan)</div>}
                       {m.text && <span>{m.text}</span>}
-                      {m.analysis && <span>{formatAnalysisText(m.analysis)}</span>}
-                      {m.analysis && !m.savedMealId && !m.undone && (
-                        <div className="chat-bubble-actions">
-                          <button type="button" className="chat-save-meal-btn" onClick={() => saveAnalysisToMeals(m.id, m.analysis)} disabled={m.saving}>
-                            {m.saving ? "Menyimpan…" : "Simpan ke Dashboard"}
-                          </button>
-                        </div>
+                      {m.analysis?.category === "vitamin" ? (
+                        <>
+                          <span>{formatVitaminAnalysisText(m.analysis)}</span>
+                          {m.analysis.vitamins.map((v, i) => (
+                            <div className="chat-bubble-actions" key={i}>
+                              {!v.saved_vitamin_id && !v.undone && (
+                                <button
+                                  type="button" className="chat-save-meal-btn"
+                                  onClick={() => saveVitaminItemToDashboard(m.id, i, v)}
+                                  disabled={!!m.vitaminSaving?.[i]}
+                                >
+                                  {m.vitaminSaving?.[i] ? "Menyimpan…" : `Simpan "${v.name}" ke Dashboard`}
+                                </button>
+                              )}
+                              {m.vitaminErrors?.[i] && <div className="chat-save-error">{m.vitaminErrors[i]}</div>}
+                              {v.saved_vitamin_id && !v.undone && (
+                                <>
+                                  <span className="chat-saved-tag">✓ &quot;{v.name}&quot; tersimpan ke vitamin</span>
+                                  <ConfirmButton onConfirm={() => undoSavedVitaminItem(m.id, i, v.saved_vitamin_id)}>Hapus</ConfirmButton>
+                                </>
+                              )}
+                              {v.undone && <span className="chat-saved-tag">Dihapus dari vitamin</span>}
+                            </div>
+                          ))}
+                        </>
+                      ) : (
+                        <>
+                          {m.analysis && <span>{formatAnalysisText(m.analysis)}</span>}
+                          {m.analysis && !m.savedMealId && !m.undone && (
+                            <div className="chat-bubble-actions">
+                              <button type="button" className="chat-save-meal-btn" onClick={() => saveAnalysisToMeals(m.id, m.analysis)} disabled={m.saving}>
+                                {m.saving ? "Menyimpan…" : "Simpan ke Dashboard"}
+                              </button>
+                            </div>
+                          )}
+                          {m.saveError && <div className="chat-save-error">{m.saveError}</div>}
+                          {m.savedMealId && !m.undone && (
+                            <div className="chat-bubble-actions">
+                              <span className="chat-saved-tag">✓ Tersimpan ke menu hari ini</span>
+                              <ConfirmButton onConfirm={() => undoSavedMeal(m.id, m.savedMealId)}>Hapus</ConfirmButton>
+                            </div>
+                          )}
+                          {m.undone && <div className="chat-bubble-actions"><span className="chat-saved-tag">Dihapus dari menu</span></div>}
+                        </>
                       )}
-                      {m.saveError && <div className="chat-save-error">{m.saveError}</div>}
-                      {m.savedMealId && !m.undone && (
-                        <div className="chat-bubble-actions">
-                          <span className="chat-saved-tag">✓ Tersimpan ke menu hari ini</span>
-                          <ConfirmButton onConfirm={() => undoSavedMeal(m.id, m.savedMealId)}>Hapus</ConfirmButton>
-                        </div>
-                      )}
-                      {m.undone && <div className="chat-bubble-actions"><span className="chat-saved-tag">Dihapus dari menu</span></div>}
                     </>
                   )}
                 </div>
@@ -408,10 +510,11 @@ export default function ChatPage() {
       <p className="disclaimer">
         Balasan Bloom dibuat oleh AI (Gemini) — obrolan umum soal gizi/kehamilan bersifat informasi
         umum, bukan pengganti konsultasi dokter/bidan. Perkiraan gizi dari menu yang diceritakan/difoto
-        juga estimasi kasar, bukan pengukuran presisi — klik "Simpan ke Dashboard" untuk menambahkannya
-        ke menu hari ini (bisa diedit/dihapus dari Dashboard kapan saja). Fotonya sendiri tidak
-        disimpan di Bloom — cuma dikirim ke Gemini untuk dianalisis lalu dibuang; riwayat chat
-        menyimpan teks dan hasil analisisnya saja.
+        juga estimasi kasar, bukan pengukuran presisi; hasil baca label kemasan/vitamin juga bisa
+        salah baca — cek lagi ke kemasan aslinya kalau ragu. Klik "Simpan ke Dashboard" untuk
+        menambahkan menu atau vitamin yang terdeteksi (bisa dihapus dari Dashboard kapan saja).
+        Fotonya sendiri tidak disimpan di Bloom — cuma dikirim ke Gemini untuk dianalisis lalu
+        dibuang; riwayat chat menyimpan teks dan hasil analisisnya saja.
       </p>
     </div>
   );
