@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
+import HelpTip from "@/components/HelpTip";
 import { todayISO } from "@/lib/nutrition";
 import { computeGestationalAge, trimesterForWeeks } from "@/lib/pregnancy";
 import {
@@ -581,8 +582,11 @@ export default function JournalPage() {
           )}
         </div>
         <div className="attach-hint">
-          Foto/video maks {MAX_ATTACHMENT_MB}MB per file, maks {MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.
-          Voice note butuh izin akses mic browser dan otomatis berhenti di {Math.round(MAX_RECORDING_SECONDS / 60)} menit.
+          Batas lampiran
+          <HelpTip label="Batas lampiran">
+            Foto/video maks {MAX_ATTACHMENT_MB}MB per file, maks {MAX_ATTACHMENTS_PER_ENTRY} lampiran per catatan.
+            Voice note butuh izin akses mic browser dan otomatis berhenti di {Math.round(MAX_RECORDING_SECONDS / 60)} menit.
+          </HelpTip>
         </div>
 
         {attachErr && <div className="error-box">{attachErr}</div>}

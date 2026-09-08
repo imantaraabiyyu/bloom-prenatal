@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
+import HelpTip from "@/components/HelpTip";
 import { todayISO } from "@/lib/nutrition";
 import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
@@ -268,11 +269,13 @@ export default function ProfilePage() {
       <div className="bloom-grid">
         {/* Nama — dipakai untuk sapaan personal di notifikasi Web Push */}
         <div className="panel full">
-          <h2>Nama</h2>
-          <p className="format-hint" style={{ marginTop: 0 }}>
-            Dipakai buat menyapa kamu secara personal di notifikasi pengingat Bloom (mis. "Pagi,
-            Sarah!"). Boleh dikosongkan — notifikasinya tetap jalan pakai sapaan umum.
-          </p>
+          <h2>
+            Nama
+            <HelpTip>
+              Dipakai buat menyapa kamu secara personal di notifikasi pengingat Bloom (mis. "Pagi,
+              Sarah!"). Boleh dikosongkan — notifikasinya tetap jalan pakai sapaan umum.
+            </HelpTip>
+          </h2>
           <div className="manual-form-row">
             <input
               type="text" placeholder="Nama kamu (mis. Sarah)"
@@ -287,20 +290,22 @@ export default function ProfilePage() {
 
         {/* Notifikasi — Web Push (lihat lib/push.js + app/api/cron/reminders) */}
         <div className="panel full">
-          <h2>Notifikasi</h2>
+          <h2>
+            Notifikasi
+            <HelpTip label="Soal notifikasi push">
+              Kalau diaktifkan, Bloom mengirim 4 pengingat tiap hari: pagi (sapaan + semangat/fakta
+              kehamilan), siang (ajakan makan siang + fakta gizi), malam pukul 19:00 (kalau menu
+              atau vitamin hari ini belum dicatat), dan menjelang tidur (pengingat istirahat +
+              afirmasi). Di iPhone, tambahkan Bloom ke Layar Utama dulu (Safari → Share → Add to
+              Home Screen) — notifikasi cuma bisa muncul lewat itu di iOS 16.4 ke atas.
+            </HelpTip>
+          </h2>
           {!pushSupported ? (
             <p className="format-hint" style={{ marginTop: 0 }}>
               ⚠ Push notification belum didukung di browser ini.
             </p>
           ) : (
             <>
-              <p className="format-hint" style={{ marginTop: 0 }}>
-                Kalau diaktifkan, Bloom mengirim 4 pengingat tiap hari: pagi (sapaan + semangat/fakta
-                kehamilan), siang (ajakan makan siang + fakta gizi), malam pukul 19:00 (kalau menu
-                atau vitamin hari ini belum dicatat), dan menjelang tidur (pengingat istirahat +
-                afirmasi). Di iPhone, tambahkan Bloom ke Layar Utama dulu (Safari → Share → Add to
-                Home Screen) — notifikasi cuma bisa muncul lewat itu di iOS 16.4 ke atas.
-              </p>
               {pushPermission === "denied" && (
                 <div className="error-box">
                   ⚠ Izin notifikasi ditolak di browser ini. Aktifkan lagi lewat pengaturan situs
@@ -326,13 +331,15 @@ export default function ProfilePage() {
 
         {/* Usia kehamilan (dari HPHT) + progress tracker */}
         <div className="panel full">
-          <h2>Usia kehamilan</h2>
-          <p className="format-hint" style={{ marginTop: 0 }}>
-            <strong>HPHT</strong> = Hari Pertama Haid Terakhir, yaitu tanggal mulai menstruasi
-            terakhirmu sebelum hamil. Ini patokan standar dokter/bidan untuk menghitung usia
-            kehamilan dan HPL (Hari Perkiraan Lahir) — Bloom memakai tanggal yang sama (aturan
-            Naegele: HPL = HPHT + 280 hari).
-          </p>
+          <h2>
+            Usia kehamilan
+            <HelpTip label="Apa itu HPHT">
+              <strong>HPHT</strong> = Hari Pertama Haid Terakhir, yaitu tanggal mulai menstruasi
+              terakhirmu sebelum hamil. Ini patokan standar dokter/bidan untuk menghitung usia
+              kehamilan dan HPL (Hari Perkiraan Lahir) — Bloom memakai tanggal yang sama (aturan
+              Naegele: HPL = HPHT + 280 hari).
+            </HelpTip>
+          </h2>
           {!hpht && !hphtEditing && (
             <button className="manual-form-save" onClick={openHphtForm}>+ Isi tanggal</button>
           )}

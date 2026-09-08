@@ -425,6 +425,23 @@ button, input { font-family: inherit; }
 .attach-menu-item:hover { background: rgba(243,237,233,0.08); color: var(--text); }
 .attach-menu-item input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
+/* ---------- HelpTip ("?" -> reveal a hint on click, components/HelpTip.js) ---------- */
+.help-tip { position: relative; display: inline-block; margin-left: 6px; vertical-align: middle; }
+.help-tip-trigger {
+  width: 18px; height: 18px; border-radius: 50%; padding: 0;
+  border: 1px solid rgba(243,237,233,0.28); background: rgba(243,237,233,0.06);
+  color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600;
+  line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.help-tip-trigger:hover { border-color: var(--accent); color: var(--accent); }
+.help-tip-bubble {
+  position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 20;
+  width: max-content; max-width: min(280px, calc(100vw - 40px));
+  background: #1c1219; border: 1px solid rgba(243,237,233,0.16); border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; line-height: 1.55; color: var(--text-dim); text-align: left;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
 /* ---------- Delete confirmation (ConfirmButton) ---------- */
 /* margin-left:auto so it still lands at the end of a row on its own —
    harmless where a flex:1 sibling already pushes it there (.meal-list-remove

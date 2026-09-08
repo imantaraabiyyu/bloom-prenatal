@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import MiniCalendar from "@/components/MiniCalendar";
+import HelpTip from "@/components/HelpTip";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
@@ -503,7 +504,15 @@ export default function Dashboard() {
         {/* Upload column */}
         <div>
           <div className="panel">
-            <h2>Menu makan</h2>
+            <h2>
+              Menu makan
+              <HelpTip label="Format kolom CSV">
+                Kolom yang dikenali: <code>date</code>, <code>meal</code>, <code>calories</code>, <code>protein_g</code>,{" "}
+                <code>iron_mg</code>, <code>calcium_mg</code>, <code>folate_mcg</code>, <code>vitamin_d_mcg</code>,{" "}
+                <code>fiber_g</code>, <code>water_ml</code>, <code>dha_mg</code>, <code>vitamin_k_mcg</code>. Baris dengan
+                tanggal sama akan dijumlahkan otomatis.
+              </HelpTip>
+            </h2>
             <label className="upload-drop" {...makeDropHandlers(handleMealFile)}>
               <input type="file" accept=".csv,text/csv" onChange={(e) => handleMealFile(e.target.files?.[0])} />
               <div className="ico">🍽️</div>
@@ -513,12 +522,6 @@ export default function Dashboard() {
             {mealFileName && <div className="file-name">{mealFileName}</div>}
             {mealError && <div className="error-box">{mealError}</div>}
             <button className="sample-btn" onClick={() => downloadText("contoh-menu.csv", SAMPLE_MEAL_CSV)}>⬇ Contoh CSV menu</button>
-            <div className="format-hint">
-              Kolom yang dikenali: <code>date</code>, <code>meal</code>, <code>calories</code>, <code>protein_g</code>,{" "}
-              <code>iron_mg</code>, <code>calcium_mg</code>, <code>folate_mcg</code>, <code>vitamin_d_mcg</code>,{" "}
-              <code>fiber_g</code>, <code>water_ml</code>, <code>dha_mg</code>, <code>vitamin_k_mcg</code>. Baris dengan
-              tanggal sama akan dijumlahkan otomatis.
-            </div>
 
             <button className="manual-form-toggle" onClick={() => (mealFormOpen ? closeMealForm() : openMealForm())}>
               {mealFormOpen ? "▲ Tutup form manual" : "+ Tambah menu manual"}
@@ -559,7 +562,13 @@ export default function Dashboard() {
 
             <div className="divider" />
 
-            <h2>Vitamin dari dokter</h2>
+            <h2>
+              Vitamin dari dokter
+              <HelpTip label="Soal keakuratan data gizi">
+                Nilai gizi per vitamin bersifat contoh berdasarkan label umum — sesuaikan dengan
+                kemasan asli dan anjuran dokter/apoteker kamu.
+              </HelpTip>
+            </h2>
             <label className="upload-drop" {...makeDropHandlers(handleVitFile)}>
               <input type="file" accept=".csv,text/csv" onChange={(e) => handleVitFile(e.target.files?.[0])} />
               <div className="ico">💊</div>
@@ -569,10 +578,6 @@ export default function Dashboard() {
             {vitFileName && <div className="file-name">{vitFileName}</div>}
             {vitError && <div className="error-box">{vitError}</div>}
             <button className="sample-btn" onClick={() => downloadText("contoh-vitamin.csv", SAMPLE_VIT_CSV)}>⬇ Contoh CSV vitamin (Folamil Genio, Cavit D3)</button>
-            <div className="format-hint">
-              Nilai gizi per vitamin bersifat contoh berdasarkan label umum — sesuaikan dengan
-              kemasan asli dan anjuran dokter/apoteker kamu.
-            </div>
 
             <button className="manual-form-toggle" onClick={() => (vitFormOpen ? closeVitForm() : openVitForm())}>
               {vitFormOpen ? "▲ Tutup form manual" : "+ Tambah vitamin manual"}
@@ -746,13 +751,17 @@ export default function Dashboard() {
         {/* Nutrisi tambahan (custom, di luar NUTRIENT_ORDER) dari vitamin yang dicentang hari ini */}
         {currentDate && Object.keys(todaysExtraTotals).length > 0 && (
           <div className="panel full">
-            <h3>Nutrisi lain — {currentDate}</h3>
+            <h3>
+              Nutrisi lain — {currentDate}
+              <HelpTip>
+                Nutrisi tambahan — belum ada target harian bawaan untuk ini, jadi hanya ditampilkan sebagai catatan.
+              </HelpTip>
+            </h3>
             <div className="extra-today-list">
               {Object.entries(todaysExtraTotals).map(([slug, e]) => (
                 <span className="extra-today-chip" key={slug}>{e.label} {Math.round(e.value * 100) / 100}{e.unit}</span>
               ))}
             </div>
-            <p className="format-hint" style={{ marginTop: 10 }}>Nutrisi tambahan — belum ada target harian bawaan untuk ini, jadi hanya ditampilkan sebagai catatan.</p>
           </div>
         )}
 
@@ -836,8 +845,12 @@ export default function Dashboard() {
         {/* Trend */}
         {datesWithMeals.length > 1 && (
           <div className="panel full">
-            <h3>Tren dari hari ke hari</h3>
-            <p className="trend-note">Setiap garis menunjukkan % dari target harian — garis putus-putus di 100% berarti "tercukupi penuh".</p>
+            <h3>
+              Tren dari hari ke hari
+              <HelpTip>
+                Setiap garis menunjukkan % dari target harian — garis putus-putus di 100% berarti "tercukupi penuh".
+              </HelpTip>
+            </h3>
             <div className="trend-svg-wrap">
               <svg width={tw} height={th} viewBox={`0 0 ${tw} ${th}`}>
                 {gridTicks.map((v) => (
