@@ -1,10 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg1: #3a2740; --bg2: #251722; --bg3: #1c1219;
+  /* Deepened from the original dark-plum values for a richer, more
+     "premium" feel -- same hue family, just less mid-tone/washed-out. */
+  --bg1: #2e1f38; --bg2: #1c1220; --bg3: #120b10;
   --text: #F3EDE9; --text-dim: #cbb8c9; --text-dimmer: #a591a3; --text-faint: #8a7a89;
-  --accent: #E3B65E; --lilac: #C9A6D0; --sage: #8FAE8B; --rose: #C77B7B;
-  --panel: rgba(255,255,255,0.035); --panel-border: rgba(243,237,233,0.08);
+  --accent: #E0A94A; --lilac: #C9A6D0; --sage: #8FAE8B; --rose: #C77B7B;
+  --panel: rgba(255,255,255,0.035); --panel-border: rgba(243,237,233,0.12);
+  --panel-shadow: 0 8px 32px rgba(0,0,0,0.35);
 }
 * { box-sizing: border-box; }
 html, body {
@@ -57,7 +60,7 @@ button, input { font-family: inherit; }
 
 .bloom-header { max-width: 920px; margin: 22px auto 24px; }
 .bloom-eyebrow { font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--lilac); margin: 0 0 6px; }
-.bloom-title { font-family: 'Fraunces', serif; font-weight: 500; font-size: clamp(30px,5vw,44px); margin: 0 0 8px; letter-spacing: -.01em; }
+.bloom-title { font-family: 'Fraunces', serif; font-weight: 500; font-size: clamp(32px,5.5vw,50px); margin: 0 0 8px; letter-spacing: -.01em; }
 .bloom-sub { color: var(--text-dim); font-size: 14.5px; max-width: 600px; line-height: 1.5; margin: 0; }
 .trimester-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 .trimester-btn { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 8px 14px; border-radius: 100px; border: 1px solid rgba(243,237,233,0.2); background: transparent; color: var(--text-dim); }
@@ -88,9 +91,9 @@ button, input { font-family: inherit; }
    back down to wherever it's actually supposed to happen. */
 .bloom-grid { max-width: 920px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 @media (min-width: 820px) { .bloom-grid { grid-template-columns: 340px minmax(0, 1fr); } }
-.panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 18px; padding: 22px; }
+.panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 18px; padding: 22px; box-shadow: var(--panel-shadow); }
 .full { grid-column: 1 / -1; }
-.panel h2, .panel h3 { font-family: 'Fraunces', serif; font-size: 18px; margin: 0 0 14px; font-weight: 500; }
+.panel h2, .panel h3 { font-family: 'Fraunces', serif; font-size: 19.5px; letter-spacing: -.005em; margin: 0 0 16px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
 
 /* ---------- Upload widgets ---------- */
 .upload-drop { border: 1.5px dashed rgba(243,237,233,0.28); border-radius: 14px; padding: 22px 14px; text-align: center; cursor: pointer; display: block; margin-bottom: 8px; }
@@ -489,15 +492,10 @@ button, input { font-family: inherit; }
     flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
     padding: 6px 4px; border-radius: 12px; background: none; font-size: 10.5px;
   }
-  /* icon above the label, purely via generated content keyed off each
-     link's href -- Next's <Link> renders a plain <a href="...">, so this
-     needs no markup change. Matches the emoji-icon style already used
-     elsewhere in the app (notification titles, attach/edit buttons). */
-  .nav-link::before { font-size: 19px; line-height: 1; }
-  .topbar-nav a[href="/dashboard"]::before { content: "🏠"; }
-  .topbar-nav a[href="/dashboard/journal"]::before { content: "📓"; }
-  .topbar-nav a[href="/dashboard/chat"]::before { content: "💬"; }
-  .topbar-nav a[href="/dashboard/profile"]::before { content: "👤"; }
+  /* Icon above the label -- was CSS-generated content keyed off each
+     link's href; now a real lucide-react <Icon/> child in each page's
+     JSX instead (a CSS ::before can't render an SVG component), sized
+     via the size prop there rather than font-size here. */
 
   /* fixed 3-column layout has no room to breathe under ~350px of content
      width — stack name / bar / value so the bar stays readable */
