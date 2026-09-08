@@ -165,6 +165,35 @@ Tanpa `GEMINI_API_KEY` diisi, notifikasinya tetap terkirim — kalimat
 tambahannya jatuh ke daftar kalimat afirmasi/fakta statis di
 `lib/reminderLogic.js` alih-alih hasil generate Gemini.
 
+## 7. (Opsional) Aktifkan fallback email kalau push gagal terkirim
+
+Kadang satu push notification gagal sampai ke HP — bukan karena langganan
+push-nya sudah dihapus (itu ditangani sendiri, lihat bagian 6 di atas),
+tapi gangguan sementara (jaringan, layanan push lagi down, dll). Kalau
+diisi, Bloom otomatis kirim isi pengingat yang sama lewat email begitu
+**semua** perangkat push milik satu pengguna gagal di satu waktu jadwal
+tertentu — bukan cuma kalau salah satu dari beberapa perangkatnya gagal
+(kalau perangkat lain masih berhasil, pengguna itu sudah ke-notify, jadi
+email tidak dikirim lagi).
+
+1. Daftar gratis di [resend.com](https://resend.com) → buat API key.
+2. Tambahkan ke `.env.local` (lokal) **dan** Vercel (produksi):
+   ```
+   RESEND_API_KEY=...     # dari langkah 1
+   EMAIL_FROM=...         # opsional -- default "Bloom <onboarding@resend.dev>",
+                          # alamat sandbox Resend sendiri yang sudah bisa kirim
+                          # ke email siapa pun tanpa verifikasi domain dulu.
+                          # Ganti ke alamat di domain kamu sendiri kapan saja
+                          # kalau sudah verifikasi domain di Resend.
+   ```
+3. Tidak perlu ubah `supabase/schema.sql` — fitur ini cuma membaca email
+   akun (`auth.users`, lewat service-role key yang sama seperti bagian 6),
+   tidak menyimpan apa pun baru.
+
+Tanpa `RESEND_API_KEY` diisi, fitur ini otomatis tidak aktif (fallback-nya
+dilewati, bukan error) — notifikasi push tetap jalan seperti biasa, cuma
+tanpa jaring pengaman email itu.
+
 ## Coba di komputer sendiri dulu (opsional)
 
 ```
@@ -245,6 +274,9 @@ lib/
   push.js                → helper client-side: minta izin notifikasi, subscribe/unsubscribe
                             PushManager
   pushSender.js          → wrapper web-push (server-only) -- setup VAPID + kirim notifikasi
+  emailSender.js         → wrapper Resend (server-only) -- fallback email kalau SEMUA push
+                            milik satu pengguna gagal terkirim (lihat README bagian 7),
+                            no-op kalau RESEND_API_KEY belum diisi
   reminderLogic.js       → logika murni pengingat push (siapa yang belum catat apa, susun
                             isi pesan, bank kalimat fallback) -- tanpa I/O, gampang di-test
 supabase/
