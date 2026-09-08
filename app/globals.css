@@ -15,7 +15,11 @@ html, body {
 a { color: inherit; }
 button, input { font-family: inherit; }
 
-.wrap { max-width: 960px; margin: 0 auto; padding: 0 20px 60px; }
+/* env(safe-area-inset-*) resolves to 0 outside standalone/edge-to-edge
+   mode (viewportFit:"cover" in layout.js is what turns it on at all) --
+   the left/right add here is a no-op in a normal browser tab, and only
+   matters once installed, mainly in landscape on a curved-edge phone. */
+.wrap { max-width: 960px; margin: 0 auto; padding: 0 calc(20px + env(safe-area-inset-right)) 60px calc(20px + env(safe-area-inset-left)); }
 
 /* ---------- Auth ---------- */
 .auth-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -37,7 +41,9 @@ button, input { font-family: inherit; }
 .auth-note { margin-top: 18px; font-size: 11px; color: var(--text-faint); line-height: 1.6; text-align: center; }
 
 /* ---------- Topbar ---------- */
-.topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 20px 0 0; }
+/* Same env(safe-area-inset-top) reasoning as .wrap above -- pushes the
+   avatar/name/logout row clear of the status bar/notch once installed. */
+.topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: calc(20px + env(safe-area-inset-top)) 0 0; }
 .topbar-left { display: flex; align-items: center; gap: 10px; }
 .avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #2B1B2E; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; font-family: 'Fraunces', serif; }
 .user-name { font-size: 14px; color: var(--text); font-weight: 600; }
@@ -412,10 +418,42 @@ button, input { font-family: inherit; }
 
 /* ---------- Mobile ---------- */
 @media (max-width: 560px) {
-  .wrap { padding: 0 14px 40px; }
+  /* Height of the fixed bottom tab bar below (content box, not counting the
+     safe-area inset it also pads with) -- named once so the bar's own
+     padding and every page's bottom clearance for it can't drift apart. */
+  :root { --bottom-nav-h: 58px; }
+
+  /* +env(safe-area-inset-bottom) clears the new fixed bottom tab bar (see
+     .topbar-nav below); left/right keep the base rule's inset handling. */
+  .wrap { padding: 0 calc(14px + env(safe-area-inset-right)) calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 12px) calc(14px + env(safe-area-inset-left)); }
   .panel { padding: 16px; border-radius: 14px; }
   .bloom-header { margin: 18px auto 20px; }
-  .topbar { padding: 14px 0 0; }
+  .topbar { padding: calc(14px + env(safe-area-inset-top)) 0 0; }
+
+  /* ---------- Bottom tab bar ----------
+     Reuses the existing .topbar-nav/.nav-link markup as-is (same 4 Links on
+     every dashboard page) -- no JSX changes anywhere, just repositioned +
+     re-skinned at this breakpoint. Desktop/tablet (>560px) keeps the
+     original top-row rendering untouched. */
+  .topbar-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; gap: 0;
+    padding: 6px calc(4px + env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) calc(4px + env(safe-area-inset-right));
+    background: #1c1219; border-top: 1px solid rgba(243,237,233,0.1);
+  }
+  .nav-link {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 4px; border-radius: 12px; background: none; font-size: 10.5px;
+  }
+  /* icon above the label, purely via generated content keyed off each
+     link's href -- Next's <Link> renders a plain <a href="...">, so this
+     needs no markup change. Matches the emoji-icon style already used
+     elsewhere in the app (notification titles, attach/edit buttons). */
+  .nav-link::before { font-size: 19px; line-height: 1; }
+  .topbar-nav a[href="/dashboard"]::before { content: "🏠"; }
+  .topbar-nav a[href="/dashboard/journal"]::before { content: "📓"; }
+  .topbar-nav a[href="/dashboard/chat"]::before { content: "💬"; }
+  .topbar-nav a[href="/dashboard/profile"]::before { content: "👤"; }
 
   /* fixed 3-column layout has no room to breathe under ~350px of content
      width — stack name / bar / value so the bar stays readable */
@@ -471,4 +509,25 @@ button, input { font-family: inherit; }
   .chat-page .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .chat-page .chat-thread { flex: 1; min-height: 0; max-height: none; }
   .chat-page .chat-input-area { flex-shrink: 0; }
+
+  /* ---------- Targeted label/detail text bump ----------
+     These were all under 12px at base size -- fine on a desktop panel,
+     cramped on a phone screen. Small, isolated bumps; nothing here
+     changes layout/reflow, just legibility. */
+  .summary-card .lbl, .extra-nutrient-label { font-size: 12.5px; }
+  .meal-list-detail, .ring-legend-value, .pregnancy-stat-label, .vitamin-detail { font-size: 12px; }
+  .mini-calendar-weekdays span, .transcript-preview-label { font-size: 12px; }
+
+  /* ---------- Targeted tap-target bump ----------
+     List-row actions people tap often on a phone -- grown via padding
+     (not font-size, so the icon itself doesn't look oversized) toward
+     Apple/Google's ~40px minimum touch-target guidance. Deliberately not
+     touching the corner remove-badges on photo/video attachment
+     thumbnails (.pending-remove-btn / .entry-attachment-remove) -- a
+     different, smaller-by-design badge convention. */
+  .vitamin-remove, .meal-list-remove, .babyname-remove,
+  .journal-entry-edit, .journal-entry-remove, .extra-nutrient-row button {
+    padding: 10px;
+  }
+  .mini-calendar-header button { width: 36px; height: 36px; }
 }
