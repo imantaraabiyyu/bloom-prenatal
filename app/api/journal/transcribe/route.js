@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
-import { streamTranscribeVoiceNote, GeminiHttpError } from "@/lib/gemini";
+import { streamTranscribeVoiceNote, isGeminiBusyError, GEMINI_BUSY_MESSAGE } from "@/lib/gemini";
 
 // Second (and only other) backend route in this app, alongside
 // /api/nutrition-chat — same shape: a thin authenticated proxy to Gemini,
@@ -56,12 +56,9 @@ export async function POST(request) {
         send({ type: "done", result });
       } catch (e) {
         console.error("journal transcribe stream error:", e);
-        const busy = e instanceof GeminiHttpError && (e.status === 503 || e.status === 429);
         send({
           type: "error",
-          error: busy
-            ? "Gemini lagi ramai dipakai. Coba lagi dalam beberapa saat ya."
-            : "Gagal mentranskrip voice note ini. Coba lagi sebentar lagi.",
+          error: isGeminiBusyError(e) ? GEMINI_BUSY_MESSAGE : "Gagal mentranskrip voice note ini. Coba lagi sebentar lagi.",
         });
       } finally {
         controller.close();

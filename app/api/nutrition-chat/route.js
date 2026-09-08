@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
-import { streamNutritionChatTurn, GeminiHttpError } from "@/lib/gemini";
+import { streamNutritionChatTurn, isGeminiBusyError, GEMINI_BUSY_MESSAGE } from "@/lib/gemini";
 
 // This app's only backend route: a thin, authenticated proxy in front of the
 // Gemini API for the in-app nutrition chat (app/dashboard/chat/page.js). It
@@ -68,15 +68,14 @@ export async function POST(request) {
         send({ type: "done", result });
       } catch (e) {
         console.error("nutrition-chat stream error:", e);
-        // GeminiHttpError already survived a couple of retries (see
-        // fetchGeminiStream in lib/gemini.js) by the time it gets here — this
-        // is what's shown once those are exhausted too.
-        const busy = e instanceof GeminiHttpError && (e.status === 503 || e.status === 429);
+        // A retryable GeminiHttpError (503) already survived a couple of
+        // retries (see fetchGeminiWithRetries in lib/gemini.js) by the time
+        // it gets here; a 429 never retries at all (see the comment on
+        // RETRYABLE_STATUS there) — either way, this is what's shown once
+        // Gemini itself won't cooperate.
         send({
           type: "error",
-          error: busy
-            ? "Gemini lagi ramai dipakai. Coba kirim lagi dalam beberapa saat ya."
-            : "Ada gangguan pas memproses pesannya. Coba lagi sebentar lagi.",
+          error: isGeminiBusyError(e) ? GEMINI_BUSY_MESSAGE : "Ada gangguan pas memproses pesannya. Coba lagi sebentar lagi.",
         });
       } finally {
         controller.close();
