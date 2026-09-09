@@ -11,6 +11,7 @@ import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
   gestationalProgressPct, formatDateID, FULL_TERM_WEEKS,
 } from "@/lib/pregnancy";
+import { computeBMI, bmiCategory, BMI_CATEGORY_META } from "@/lib/weight";
 import { isPushSupported, getPushState, subscribeToPush, unsubscribeFromPush } from "@/lib/push";
 
 const GENDER_META = {
@@ -54,6 +55,16 @@ export default function ProfilePage() {
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState("");
 
+  // berat badan sebelum hamil + tinggi badan — dipakai lib/weight.js untuk
+  // BMI + target kenaikan berat badan (IOM), ditampilkan di panel "Berat
+  // badan" di Dashboard (app/dashboard/page.js). Keduanya opsional.
+  const [prePregWeightKg, setPrePregWeightKg] = useState(null);
+  const [heightCm, setHeightCm] = useState(null);
+  const [bioDraftWeight, setBioDraftWeight] = useState("");
+  const [bioDraftHeight, setBioDraftHeight] = useState("");
+  const [bioSaving, setBioSaving] = useState(false);
+  const [bioError, setBioError] = useState("");
+
   // notifikasi push (Web Push) — lihat lib/push.js
   const [pushSupported, setPushSupported] = useState(true); // asumsi optimis sampai dicek di client
   const [pushPermission, setPushPermission] = useState("default");
@@ -86,6 +97,10 @@ export default function ProfilePage() {
       setHpht(profile?.hpht || null);
       setName(profile?.name || "");
       setNameDraft(profile?.name || "");
+      setPrePregWeightKg(profile?.pre_pregnancy_weight_kg ?? null);
+      setHeightCm(profile?.height_cm ?? null);
+      setBioDraftWeight(profile?.pre_pregnancy_weight_kg != null ? String(profile.pre_pregnancy_weight_kg) : "");
+      setBioDraftHeight(profile?.height_cm != null ? String(profile.height_cm) : "");
 
       const { data: nameRows } = await supabase
         .from("baby_names")
@@ -131,6 +146,28 @@ export default function ProfilePage() {
     setName(trimmed);
   }
 
+  // ---------------- berat & tinggi badan sebelum hamil ----------------
+  // Both optional -- an empty draft saves null (not 0), same "don't force a
+  // fake number" spirit as name's `trimmed || null` above.
+  async function saveBio() {
+    setBioError("");
+    const w = parseFloat(bioDraftWeight);
+    const h = parseFloat(bioDraftHeight);
+    if (bioDraftWeight.trim() && (isNaN(w) || w <= 0)) { setBioError("Berat badan tidak valid."); return; }
+    if (bioDraftHeight.trim() && (isNaN(h) || h <= 0)) { setBioError("Tinggi badan tidak valid."); return; }
+    setBioSaving(true);
+    const nextWeight = bioDraftWeight.trim() ? w : null;
+    const nextHeight = bioDraftHeight.trim() ? h : null;
+    const { error } = await supabase.from("profiles").upsert(
+      { user_id: user.id, pre_pregnancy_weight_kg: nextWeight, height_cm: nextHeight },
+      { onConflict: "user_id" }
+    );
+    setBioSaving(false);
+    if (error) { setBioError(error.message); return; }
+    setPrePregWeightKg(nextWeight);
+    setHeightCm(nextHeight);
+  }
+
   // ---------------- notifikasi push ----------------
   async function handleEnablePush() {
     setPushError("");
@@ -170,6 +207,11 @@ export default function ProfilePage() {
   // trimesterForDate in lib/pregnancy.js. Nothing to store: this is always
   // freshly computed from hpht, never a saved preference.
   const trimester = trimesterForDate(hpht, todayISO());
+
+  // PRE-PREGNANCY BMI (see the important caveat on bmiCategory in
+  // lib/weight.js) — never computed from a logged current weight.
+  const bmi = useMemo(() => computeBMI(prePregWeightKg, heightCm), [prePregWeightKg, heightCm]);
+  const bmiCat = bmiCategory(bmi);
 
   function openHphtForm() {
     setHphtInputMode("hpht");
@@ -403,6 +445,46 @@ export default function ProfilePage() {
               <button className="extra-nutrient-add" style={{ marginTop: 12 }} onClick={openHphtForm}>Ubah HPHT/HPL</button>
             </div>
           )}
+        </div>
+
+        {/* Berat & tinggi badan sebelum hamil — dipakai lib/weight.js untuk
+            BMI + target kenaikan berat badan (panel "Berat badan" di
+            Dashboard). Keduanya opsional. */}
+        <div className="panel full">
+          <h2>
+            Berat & tinggi badan sebelum hamil
+            <HelpTip label="Kenapa ini dibutuhkan">
+              Dipakai untuk menghitung BMI dan target kenaikan berat badan selama kehamilan
+              (panduan IOM 2009) — ditampilkan di panel &quot;Berat badan&quot; di Dashboard. Boleh
+              dikosongkan; panel target kenaikan cuma tidak muncul kalau salah satu belum diisi.
+              Panduan umum, bukan pengganti anjuran dokter/bidan (dan cuma berlaku untuk kehamilan
+              satu janin, bukan kembar).
+            </HelpTip>
+          </h2>
+          <div className="manual-form-row">
+            <input
+              type="number" inputMode="decimal" min="0" step="any" placeholder="Berat sebelum hamil (kg)"
+              value={bioDraftWeight} onChange={(e) => setBioDraftWeight(e.target.value)}
+            />
+            <input
+              type="number" inputMode="decimal" min="0" step="any" placeholder="Tinggi badan (cm)"
+              value={bioDraftHeight} onChange={(e) => setBioDraftHeight(e.target.value)}
+            />
+          </div>
+          {bioError && <div className="error-box"><AlertTriangle size={13} /> {bioError}</div>}
+          {bmi != null && (
+            <p className="format-hint" style={{ marginTop: 10 }}>
+              BMI sebelum hamil: <strong>{bmi.toFixed(1)}</strong> ·{" "}
+              <span style={{ color: BMI_CATEGORY_META[bmiCat]?.color, fontWeight: 600 }}>
+                {BMI_CATEGORY_META[bmiCat]?.label}
+              </span>
+            </p>
+          )}
+          <div className="manual-form-actions">
+            <button className="manual-form-save" onClick={saveBio} disabled={bioSaving}>
+              {bioSaving ? "Menyimpan…" : "Simpan"}
+            </button>
+          </div>
         </div>
 
         {/* Calon nama bayi */}
