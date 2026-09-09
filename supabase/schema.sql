@@ -27,6 +27,12 @@ alter table public.profiles add column if not exists hpht date;
 -- (lihat app/api/cron/reminders/route.js), bukan cuma kosmetik di halaman
 -- Profil. Boleh kosong (fallback ke sapaan generik di lib/reminderLogic.js).
 alter table public.profiles add column if not exists name text;
+-- Berat badan sebelum hamil & tinggi badan — dipakai untuk menghitung BMI dan
+-- target kenaikan berat badan (IOM 2009) berdasarkan kategori BMI, lihat
+-- lib/weight.js. Keduanya opsional: fitur target/BMI cuma tidak tampil kalau
+-- salah satu belum diisi (bukan syarat wajib buat mulai mencatat berat badan).
+alter table public.profiles add column if not exists pre_pregnancy_weight_kg numeric;
+alter table public.profiles add column if not exists height_cm numeric;
 
 -- 2) Menu makan (riwayat harian)
 create table if not exists public.meals (
@@ -266,3 +272,27 @@ alter table public.push_subscriptions enable row level security;
 create policy "push_subscriptions: owner select" on public.push_subscriptions for select using (auth.uid() = user_id);
 create policy "push_subscriptions: owner insert" on public.push_subscriptions for insert with check (auth.uid() = user_id);
 create policy "push_subscriptions: owner delete" on public.push_subscriptions for delete using (auth.uid() = user_id);
+
+-- 10) Catatan berat badan (satu baris per tanggal — mencatat lagi di tanggal
+-- yang sama menimpa nilainya, bukan menambah baris baru, lihat unique(user_id,
+-- date) di bawah). Dipakai oleh app/dashboard/page.js (baca/tulis milik
+-- sendiri lewat RLS biasa) dan app/api/cron/reminders/route.js (baca lintas
+-- pengguna lewat service-role client, untuk pengingat mingguan "belum
+-- timbang" di slot pagi).
+create table if not exists public.weight_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  date date not null,
+  weight_kg numeric not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, date)
+);
+create index if not exists weight_logs_user_date_idx on public.weight_logs (user_id, date);
+
+alter table public.weight_logs enable row level security;
+
+create policy "weight_logs: owner select" on public.weight_logs for select using (auth.uid() = user_id);
+create policy "weight_logs: owner insert" on public.weight_logs for insert with check (auth.uid() = user_id);
+create policy "weight_logs: owner update" on public.weight_logs for update using (auth.uid() = user_id);
+create policy "weight_logs: owner delete" on public.weight_logs for delete using (auth.uid() = user_id);
