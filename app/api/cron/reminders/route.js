@@ -5,9 +5,9 @@ import { sendReminderEmail } from "@/lib/emailSender";
 import { generateDailyNudge, generateMealFact } from "@/lib/gemini";
 import {
   pickMissing, buildReminderBody, buildMorningBody, buildLunchBody, buildNightBody,
-  pickFallbackNudge, pickMealFactFallback, sumReminderResults,
+  pickFallbackNudge, pickMealFactFallback, sumReminderResults, buildLimitWarningClause,
 } from "@/lib/reminderLogic";
-import { todayISOInTimeZone } from "@/lib/nutrition";
+import { todayISOInTimeZone, LIMIT_ORDER, groupLimitTotalsByUser, mergeUserTotals, exceededLimitLabels } from "@/lib/nutrition";
 import { computeGestationalAge, trimesterForWeeks } from "@/lib/pregnancy";
 
 // The one scheduled sender behind all 4 daily slots (see vercel.json):
@@ -73,17 +73,43 @@ export async function GET(request) {
   const profileByUser = new Map((profileRows || []).map((p) => [p.user_id, p]));
 
   // Only the dinner slot needs to know who's already logged today -- the
-  // other 3 slots are unconditional, so skip these two queries entirely for
-  // them (no point paying for a scan the content doesn't use).
+  // other 3 slots are unconditional, so skip these queries entirely for them
+  // (no point paying for a scan the content doesn't use).
   let mealUserIds = new Set();
   let vitaminUserIds = new Set();
+  // Per-user sugar/sodium/etc. totals for today, `{ [userId]: { [limitKey]: number } }`
+  // -- lets the dinner slot warn independently of the missing-meal/vitamin
+  // check below (a user who logged everything can still be over a limit).
+  let limitTotalsByUser = {};
   if (kind === "dinner") {
-    const [{ data: mealRows }, { data: vitaminRows }] = await Promise.all([
-      supabase.from("meals").select("user_id").eq("date", today).in("user_id", userIds),
-      supabase.from("vitamin_checks").select("user_id").eq("date", today).eq("checked", true).in("user_id", userIds),
+    const limitCols = LIMIT_ORDER.join(",");
+    const [{ data: mealRows }, { data: vitaminCheckRows }] = await Promise.all([
+      supabase.from("meals").select(`user_id, ${limitCols}`).eq("date", today).in("user_id", userIds),
+      supabase.from("vitamin_checks").select("user_id, vitamin_id").eq("date", today).eq("checked", true).in("user_id", userIds),
     ]);
     mealUserIds = distinctUserIds(mealRows);
-    vitaminUserIds = distinctUserIds(vitaminRows);
+    vitaminUserIds = distinctUserIds(vitaminCheckRows);
+
+    // vitamin_checks only names which vitamin_id was checked -- need each of
+    // those vitamins' own limit-column values to actually sum anything.
+    const checkedVitaminIds = [...new Set((vitaminCheckRows || []).map((c) => c.vitamin_id))];
+    let vitaminRows = [];
+    if (checkedVitaminIds.length > 0) {
+      const { data } = await supabase.from("vitamins").select(`id, ${limitCols}`).in("id", checkedVitaminIds);
+      vitaminRows = data || [];
+    }
+    const vitaminById = new Map(vitaminRows.map((v) => [v.id, v]));
+    // Re-attach each check row's own user_id to its vitamin's limit columns
+    // (one vitamins row, looked up per check, since the same catalog vitamin
+    // could in principle be checked by more than one check row).
+    const vitaminRowsWithUser = (vitaminCheckRows || [])
+      .map((c) => {
+        const v = vitaminById.get(c.vitamin_id);
+        return v ? { ...v, user_id: c.user_id } : null;
+      })
+      .filter(Boolean);
+
+    limitTotalsByUser = mergeUserTotals(groupLimitTotalsByUser(mealRows || []), groupLimitTotalsByUser(vitaminRowsWithUser));
   }
 
   // Every user is independent (own Gemini call, own subscriptions to push
@@ -104,11 +130,15 @@ export async function GET(request) {
     let body;
     if (kind === "dinner") {
       const { missingMeal, missingVitamin } = pickMissing(mealUserIds, vitaminUserIds, userId);
-      if (!missingMeal && !missingVitamin) return { sent: 0, pruned: 0, skipped: 1 }; // both already logged -- nothing to nudge about
+      const exceededLabels = exceededLimitLabels(limitTotalsByUser[userId] || {});
+      // Both already logged AND no daily limit exceeded -- nothing to nudge
+      // about. A user who logged everything but went over a limit still
+      // gets a heads-up (the `exceededLabels.length === 0` clause is new).
+      if (!missingMeal && !missingVitamin && exceededLabels.length === 0) return { sent: 0, pruned: 0, skipped: 1 };
       let nudge;
       try { nudge = await generateDailyNudge({ trimester, weeks }); }
       catch { nudge = pickFallbackNudge(`${userId}:${today}:dinner`); }
-      body = buildReminderBody({ missingMeal, missingVitamin, nudge, name });
+      body = buildReminderBody({ missingMeal, missingVitamin, nudge, name, limitWarning: buildLimitWarningClause(exceededLabels) });
     } else if (kind === "morning" || kind === "night") {
       let nudge;
       try { nudge = await generateDailyNudge({ trimester, weeks }); }
