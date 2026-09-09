@@ -6,9 +6,16 @@ import { generateDailyNudge, generateMealFact } from "@/lib/gemini";
 import {
   pickMissing, buildReminderBody, buildMorningBody, buildLunchBody, buildNightBody,
   pickFallbackNudge, pickMealFactFallback, sumReminderResults, buildLimitWarningClause,
+  WEIGHT_NUDGE_TEXT,
 } from "@/lib/reminderLogic";
 import { todayISOInTimeZone, LIMIT_ORDER, groupLimitTotalsByUser, mergeUserTotals, exceededLimitLabels } from "@/lib/nutrition";
-import { computeGestationalAge, trimesterForWeeks } from "@/lib/pregnancy";
+import { computeGestationalAge, trimesterForWeeks, addDays } from "@/lib/pregnancy";
+
+// How far back the morning slot's "belum timbang" check looks -- 7 days
+// inclusive of today (addDays(today, -6) through today), so a user who
+// weighs in roughly weekly never gets nudged, regardless of which day of
+// the week they happen to log on.
+const WEIGHT_NUDGE_WINDOW_DAYS = 6;
 
 // The one scheduled sender behind all 4 daily slots (see vercel.json):
 //   07:00 WIB morning (unconditional), 12:00 WIB lunch (unconditional),
@@ -112,6 +119,19 @@ export async function GET(request) {
     limitTotalsByUser = mergeUserTotals(groupLimitTotalsByUser(mealRows || []), groupLimitTotalsByUser(vitaminRowsWithUser));
   }
 
+  // Only the morning slot carries the weekly "belum timbang" nudge -- same
+  // "only query what a slot's content needs" discipline as the dinner-only
+  // block above, so the other 3 slots pay nothing extra.
+  let weighedUserIds = new Set();
+  if (kind === "morning") {
+    const { data: weightRows } = await supabase
+      .from("weight_logs")
+      .select("user_id")
+      .gte("date", addDays(today, -WEIGHT_NUDGE_WINDOW_DAYS))
+      .in("user_id", userIds);
+    weighedUserIds = distinctUserIds(weightRows);
+  }
+
   // Every user is independent (own Gemini call, own subscriptions to push
   // to), so they're processed concurrently rather than summed one-by-one --
   // total wall-clock becomes roughly "slowest single user" instead of "every
@@ -143,7 +163,9 @@ export async function GET(request) {
       let nudge;
       try { nudge = await generateDailyNudge({ trimester, weeks }); }
       catch { nudge = pickFallbackNudge(`${userId}:${today}:${kind}`); }
-      body = kind === "morning" ? buildMorningBody({ name, nudge }) : buildNightBody({ name, nudge });
+      body = kind === "morning"
+        ? buildMorningBody({ name, nudge, weightNudge: weighedUserIds.has(userId) ? "" : WEIGHT_NUDGE_TEXT })
+        : buildNightBody({ name, nudge });
     } else { // lunch
       let mealFact;
       try { mealFact = await generateMealFact({ trimester, weeks }); }
