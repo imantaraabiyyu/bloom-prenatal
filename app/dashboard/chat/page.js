@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
-import { NUTRIENT_ORDER, NUTRIENT_META, todayISO, vitaminItemToRow } from "@/lib/nutrition";
+import {
+  ALL_TRACKED_NUTRIENTS, ALL_TRACKED_META,
+  todayISO, vitaminItemToRow, buildExtraNutrientsMap,
+} from "@/lib/nutrition";
 import {
   Home, NotebookText, MessageCircle, User, X, Check, Paperclip,
   Camera, Images, AlertTriangle,
@@ -42,12 +45,15 @@ function resizeImageForChat(file, maxDim = 1280, quality = 0.82) {
 }
 
 // Shared between a freshly-received analysis and one hydrated back from
-// chat_messages.analysis after a reload — same text either way.
+// chat_messages.analysis after a reload — same text either way. Iterates
+// ALL_TRACKED_NUTRIENTS (floor + ceiling type combined) so sugar/sodium/etc.
+// show up next to calories/protein/etc. the same way, plus any ad-hoc
+// extra_nutrients (Omega-3, Zinc, ...) Gemini found on this item.
 function formatAnalysisText(result) {
-  const detail = NUTRIENT_ORDER
-    .filter((n) => result[n] > 0)
-    .map((n) => `${NUTRIENT_META[n].label} ${result[n]}${NUTRIENT_META[n].unit}`)
-    .join(" · ");
+  const detail = [
+    ...ALL_TRACKED_NUTRIENTS.filter((n) => result[n] > 0).map((n) => `${ALL_TRACKED_META[n].label} ${result[n]}${ALL_TRACKED_META[n].unit}`),
+    ...(result.extra_nutrients || []).map((e) => `${e.label} ${e.value}${e.unit || ""}`),
+  ].join(" · ");
   return `🍽️ *${result.meal}*\n${detail}\n\n💬 ${result.reply}`;
 }
 
@@ -59,13 +65,25 @@ function formatAnalysisText(result) {
 function formatVitaminAnalysisText(result) {
   const lines = (result.vitamins || []).map((v) => {
     const detail = [
-      ...NUTRIENT_ORDER.filter((n) => v[n] > 0).map((n) => `${NUTRIENT_META[n].label} ${v[n]}${NUTRIENT_META[n].unit}`),
+      ...ALL_TRACKED_NUTRIENTS.filter((n) => v[n] > 0).map((n) => `${ALL_TRACKED_META[n].label} ${v[n]}${ALL_TRACKED_META[n].unit}`),
       ...(v.extra_nutrients || []).map((e) => `${e.label} ${e.value}${e.unit || ""}`),
     ].join(" · ");
     return `• *${v.name}*${detail ? ` — ${detail}` : ""}`;
   });
   return `💊 *Vitamin terdeteksi:*\n${lines.join("\n")}\n\n💬 ${result.reply}`;
 }
+
+// Soft, non-alarming badge copy for a category="food" analysis's verdict
+// (lib/gemini.js's VERDICT_VALUES) — deliberately no red/alarm styling here;
+// red is reserved for the deterministic exceeded-limit warning banner on the
+// Dashboard (app/dashboard/page.js), which is exact math, not this
+// per-item qualitative judgment call. `kurangi_dulu` still renders amber, not
+// red, per the explicit "keep a bad verdict soft" requirement.
+const VERDICT_BADGES = {
+  aman: { label: "✅ Aman dikonsumsi", className: "verdict-badge verdict-safe" },
+  waspada: { label: "🤔 Boleh, tapi dibatasi", className: "verdict-badge verdict-caution" },
+  kurangi_dulu: { label: "🍃 Porsinya dikurangi dulu ya", className: "verdict-badge verdict-caution" },
+};
 
 // One entry per past turn, used as Gemini's conversation context — never
 // includes past photos (those aren't stored, see chat_messages in
@@ -219,7 +237,11 @@ export default function ChatPage() {
       const res = await fetch("/api/nutrition-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text || null, image, history }),
+        // `today`: browser-local todayISO() -- lets the route fetch today's
+        // already-saved cumulative sugar/sodium/etc. totals (server-side,
+        // read-only) so Gemini's verdict can reason about the whole day, not
+        // just this one item (see app/api/nutrition-chat/route.js).
+        body: JSON.stringify({ message: text || null, image, history, today: todayISO() }),
       });
 
       if (!res.ok) {
@@ -284,7 +306,8 @@ export default function ChatPage() {
   async function saveAnalysisToMeals(msgId, analysis) {
     setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, saving: true, saveError: "" } : m)));
     const row = { user_id: user.id, date: todayISO(), meal: analysis.meal, source: "chat" };
-    NUTRIENT_ORDER.forEach((n) => { row[n] = analysis[n]; });
+    ALL_TRACKED_NUTRIENTS.forEach((n) => { row[n] = analysis[n]; });
+    row.extra_nutrients = buildExtraNutrientsMap(analysis.extra_nutrients);
     const { data: saved, error } = await supabase.from("meals").insert(row).select().maybeSingle();
     if (error) {
       setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, saving: false, saveError: "Gagal menyimpan, coba lagi." } : m)));
@@ -442,6 +465,12 @@ export default function ChatPage() {
                       ) : (
                         <>
                           {m.analysis && <span>{formatAnalysisText(m.analysis)}</span>}
+                          {m.analysis?.category === "food" && VERDICT_BADGES[m.analysis.verdict] && (
+                            <div className={VERDICT_BADGES[m.analysis.verdict].className}>
+                              {VERDICT_BADGES[m.analysis.verdict].label}
+                              {m.analysis.verdict_reason && ` — ${m.analysis.verdict_reason}`}
+                            </div>
+                          )}
                           {m.analysis && !m.savedMealId && !m.undone && (
                             <div className="chat-bubble-actions">
                               <button type="button" className="chat-save-meal-btn" onClick={() => saveAnalysisToMeals(m.id, m.analysis)} disabled={m.saving}>
