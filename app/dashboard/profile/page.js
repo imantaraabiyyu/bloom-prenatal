@@ -5,13 +5,16 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import HelpTip from "@/components/HelpTip";
-import { Home, NotebookText, MessageCircle, User, X, Star, AlertTriangle } from "lucide-react";
+import { Home, NotebookText, MessageCircle, User, X, Star, AlertTriangle, Scale } from "lucide-react";
 import { todayISO } from "@/lib/nutrition";
 import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
   gestationalProgressPct, formatDateID, FULL_TERM_WEEKS,
 } from "@/lib/pregnancy";
-import { computeBMI, bmiCategory, BMI_CATEGORY_META } from "@/lib/weight";
+import {
+  computeBMI, bmiCategory, BMI_CATEGORY_META, TOTAL_GAIN_RANGE_KG,
+  expectedGainRangeAtWeek, gainStatusForWeek, GAIN_STATUS_META, computeMonthlyGain,
+} from "@/lib/weight";
 import { isPushSupported, getPushState, subscribeToPush, unsubscribeFromPush } from "@/lib/push";
 
 const GENDER_META = {
@@ -57,13 +60,24 @@ export default function ProfilePage() {
 
   // berat badan sebelum hamil + tinggi badan — dipakai lib/weight.js untuk
   // BMI + target kenaikan berat badan (IOM), ditampilkan di panel "Berat
-  // badan" di Dashboard (app/dashboard/page.js). Keduanya opsional.
+  // badan" di bawah. Keduanya opsional.
   const [prePregWeightKg, setPrePregWeightKg] = useState(null);
   const [heightCm, setHeightCm] = useState(null);
   const [bioDraftWeight, setBioDraftWeight] = useState("");
   const [bioDraftHeight, setBioDraftHeight] = useState("");
   const [bioSaving, setBioSaving] = useState(false);
   const [bioError, setBioError] = useState("");
+
+  // catatan berat badan (weight_logs) — satu nilai per tanggal (upsert),
+  // dipindahkan ke sini dari Dashboard supaya jadi satu bagian utuh bareng
+  // panel berat/tinggi sebelum hamil di atas.
+  const [weightLogs, setWeightLogs] = useState([]); // sorted ascending by date
+  const [weightFormOpen, setWeightFormOpen] = useState(false);
+  const [weightDraft, setWeightDraft] = useState("");
+  const [weightFormDate, setWeightFormDate] = useState(todayISO());
+  const [weightDateOpen, setWeightDateOpen] = useState(false); // de-emphasized date field, closed by default
+  const [weightSaving, setWeightSaving] = useState(false);
+  const [weightError, setWeightError] = useState("");
 
   // notifikasi push (Web Push) — lihat lib/push.js
   const [pushSupported, setPushSupported] = useState(true); // asumsi optimis sampai dicek di client
@@ -109,6 +123,13 @@ export default function ProfilePage() {
         .order("is_favorite", { ascending: false })
         .order("name", { ascending: true });
       setNames(nameRows || []);
+
+      const { data: weightRows } = await supabase
+        .from("weight_logs")
+        .select("*")
+        .eq("user_id", u.id)
+        .order("date", { ascending: true });
+      setWeightLogs(weightRows || []);
 
       setLoading(false);
     })();
@@ -168,6 +189,46 @@ export default function ProfilePage() {
     setHeightCm(nextHeight);
   }
 
+  // ---------------- berat badan (weight_logs) ----------------
+  function openWeightForm() {
+    setWeightFormOpen(true);
+    setWeightDraft("");
+    setWeightFormDate(todayISO());
+    setWeightDateOpen(false);
+    setWeightError("");
+  }
+
+  function closeWeightForm() {
+    setWeightFormOpen(false);
+    setWeightError("");
+  }
+
+  // Upsert on (user_id, date) -- logging again for a date already saved
+  // overwrites its value instead of creating a duplicate row (see
+  // supabase/schema.sql's unique(user_id, date) on weight_logs) -- same
+  // logic the Dashboard version of this feature had.
+  async function handleSaveWeight() {
+    setWeightError("");
+    const kg = parseFloat(weightDraft);
+    if (!kg || kg <= 0) { setWeightError("Masukkan berat badan (kg) yang valid."); return; }
+    if (!weightFormDate) { setWeightError("Pilih tanggal untuk catatan ini."); return; }
+    setWeightSaving(true);
+    const { data, error } = await supabase
+      .from("weight_logs")
+      .upsert({ user_id: user.id, date: weightFormDate, weight_kg: kg }, { onConflict: "user_id,date" })
+      .select()
+      .maybeSingle();
+    setWeightSaving(false);
+    if (error) { setWeightError(error.message); return; }
+    setWeightLogs((prev) => [...prev.filter((w) => w.date !== weightFormDate), data].sort((a, b) => a.date.localeCompare(b.date)));
+    setWeightFormOpen(false);
+  }
+
+  async function handleDeleteWeight(id) {
+    setWeightLogs((prev) => prev.filter((w) => w.id !== id));
+    await supabase.from("weight_logs").delete().eq("id", id);
+  }
+
   // ---------------- notifikasi push ----------------
   async function handleEnablePush() {
     setPushError("");
@@ -212,6 +273,20 @@ export default function ProfilePage() {
   // lib/weight.js) — never computed from a logged current weight.
   const bmi = useMemo(() => computeBMI(prePregWeightKg, heightCm), [prePregWeightKg, heightCm]);
   const bmiCat = bmiCategory(bmi);
+
+  // ---------------- berat badan (weight_logs) ----------------
+  // weightLogs is always kept sorted ascending by date (fetched that way,
+  // and re-sorted after every save) -- so the last entry is the latest one,
+  // no separate "currentDate" concept needed now this lives outside the
+  // Dashboard's day-nav.
+  const latestWeightRow = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1] : null;
+  const firstWeightRow = weightLogs.length > 0 ? weightLogs[0] : null;
+  const totalGainRange = bmiCat ? TOTAL_GAIN_RANGE_KG[bmiCat] : null;
+  const gaForLatest = latestWeightRow ? computeGestationalAge(hpht, latestWeightRow.date) : null;
+  const expectedRangeLatest = gaForLatest ? expectedGainRangeAtWeek(bmiCat, gaForLatest.weeks) : null;
+  const actualGainLatest = (latestWeightRow && prePregWeightKg != null) ? latestWeightRow.weight_kg - prePregWeightKg : null;
+  const gainStatusLatest = actualGainLatest != null ? gainStatusForWeek(actualGainLatest, expectedRangeLatest) : null;
+  const monthlyGain = useMemo(() => computeMonthlyGain(weightLogs, prePregWeightKg), [weightLogs, prePregWeightKg]);
 
   function openHphtForm() {
     setHphtInputMode("hpht");
@@ -283,6 +358,64 @@ export default function ProfilePage() {
     if (filter === "favorite") return n.is_favorite;
     return n.gender === filter;
   });
+
+  // ---------------- weight trend geometry ----------------
+  // Ported from the Dashboard version of this feature — same math, now
+  // driven directly by the fetched `weightLogs` array instead of a
+  // day-nav-derived subset. Handles 0/1/2+ entries correctly: at 0 the panel
+  // below shows an empty-state instead of this SVG at all; at 1,
+  // wxPos/wyPos already center the lone point (no division by zero).
+  const canShowGainBand = !!(bmiCat && hpht && prePregWeightKg != null);
+  const weightTrendData = weightLogs.map((row) => {
+    let expectedMinKg = null, expectedMaxKg = null;
+    if (canShowGainBand) {
+      const ga = computeGestationalAge(hpht, row.date);
+      const expected = ga ? expectedGainRangeAtWeek(bmiCat, ga.weeks) : null;
+      if (expected) {
+        expectedMinKg = prePregWeightKg + expected.minKg;
+        expectedMaxKg = prePregWeightKg + expected.maxKg;
+      }
+    }
+    return { date: row.date, weight: Number(row.weight_kg), expectedMinKg, expectedMaxKg };
+  });
+  const wtw = Math.max(560, weightTrendData.length * 90), wth = 300;
+  const wpadL = 44, wpadR = 16, wpadT = 16, wpadB = 34;
+  const wplotW = wtw - wpadL - wpadR, wplotH = wth - wpadT - wpadB;
+  let wMinVal = Infinity, wMaxVal = -Infinity;
+  weightTrendData.forEach((d) => {
+    [d.weight, d.expectedMinKg, d.expectedMaxKg].forEach((v) => {
+      if (v != null) { if (v < wMinVal) wMinVal = v; if (v > wMaxVal) wMaxVal = v; }
+    });
+  });
+  if (!Number.isFinite(wMinVal)) { wMinVal = 0; wMaxVal = 1; } // defensive — panel gated on length > 0
+  const wSpan = Math.max(wMaxVal - wMinVal, 1);
+  const wValPad = wSpan * 0.15;
+  wMinVal -= wValPad; wMaxVal += wValPad;
+  const wxPos = (i) => wpadL + (weightTrendData.length === 1 ? wplotW / 2 : (i / (weightTrendData.length - 1)) * wplotW);
+  const wyPos = (v) => wpadT + wplotH - ((v - wMinVal) / (wMaxVal - wMinVal)) * wplotH;
+  const wGridTicks = Array.from({ length: 5 }, (_, i) => wMinVal + (i * (wMaxVal - wMinVal)) / 4);
+  const weightPoints = weightTrendData.map((d, i) => `${wxPos(i)},${wyPos(d.weight)}`).join(" ");
+  const expectedMinPoints = weightTrendData.map((d, i) => (d.expectedMinKg != null ? `${wxPos(i)},${wyPos(d.expectedMinKg)}` : null)).filter(Boolean).join(" ");
+  const expectedMaxPoints = weightTrendData.map((d, i) => (d.expectedMaxKg != null ? `${wxPos(i)},${wyPos(d.expectedMaxKg)}` : null)).filter(Boolean).join(" ");
+
+  // ---------------- monthly gain bar chart geometry ----------------
+  // A 4th hand-rolled SVG block, same house style as the trend charts above
+  // — bars diverge from a zero-line since a month's gain can be negative
+  // (weight loss), unlike the always-nonnegative trend line above.
+  const mtw = Math.max(420, monthlyGain.length * 80), mth = 220;
+  const mpadL = 44, mpadR = 16, mpadT = 16, mpadB = 28;
+  const mplotW = mtw - mpadL - mpadR, mplotH = mth - mpadT - mpadB;
+  let mMinVal = 0, mMaxVal = 0;
+  monthlyGain.forEach((d) => { if (d.gainKg < mMinVal) mMinVal = d.gainKg; if (d.gainKg > mMaxVal) mMaxVal = d.gainKg; });
+  if (mMinVal === 0 && mMaxVal === 0) mMaxVal = 1; // defensive — panel gated on length > 0
+  mMaxVal *= 1.15;
+  if (mMinVal < 0) mMinVal *= 1.15;
+  const myPos = (v) => mpadT + mplotH - ((v - mMinVal) / (mMaxVal - mMinVal)) * mplotH;
+  const mZeroY = myPos(0);
+  const mBarSlot = monthlyGain.length > 0 ? mplotW / monthlyGain.length : mplotW;
+  const mBarWidth = Math.min(36, mBarSlot * 0.5);
+  const mxCenter = (i) => mpadL + (i + 0.5) * mBarSlot;
+  const mGridTicks = Array.from({ length: 5 }, (_, i) => mMinVal + (i * (mMaxVal - mMinVal)) / 4);
 
   return (
     <div className="wrap">
@@ -448,14 +581,14 @@ export default function ProfilePage() {
         </div>
 
         {/* Berat & tinggi badan sebelum hamil — dipakai lib/weight.js untuk
-            BMI + target kenaikan berat badan (panel "Berat badan" di
-            Dashboard). Keduanya opsional. */}
+            BMI + target kenaikan berat badan (panel "Berat badan" di bawah).
+            Keduanya opsional. */}
         <div className="panel full">
           <h2>
             Berat & tinggi badan sebelum hamil
             <HelpTip label="Kenapa ini dibutuhkan">
               Dipakai untuk menghitung BMI dan target kenaikan berat badan selama kehamilan
-              (panduan IOM 2009) — ditampilkan di panel &quot;Berat badan&quot; di Dashboard. Boleh
+              (panduan IOM 2009) — ditampilkan di panel &quot;Berat badan&quot; di bawah. Boleh
               dikosongkan; panel target kenaikan cuma tidak muncul kalau salah satu belum diisi.
               Panduan umum, bukan pengganti anjuran dokter/bidan (dan cuma berlaku untuk kehamilan
               satu janin, bukan kembar).
@@ -485,6 +618,199 @@ export default function ProfilePage() {
               {bioSaving ? "Menyimpan…" : "Simpan"}
             </button>
           </div>
+        </div>
+
+        {/* Berat badan — consolidated section (moved here from Dashboard,
+            redesigned per a reference app the user shared: a featured stat
+            card, a static start/change/now range bar, a daily trend, and a
+            monthly gain bar chart — same structure, Bloom's own dark theme). */}
+        <div className="panel full">
+          <h2>
+            <Scale size={18} /> Berat badan
+            <HelpTip label="Soal target kenaikan berat badan">
+              Target kenaikan (panduan IOM 2009) dihitung dari BMI sebelum hamil — isi panel di
+              atas untuk melihatnya di sini. Panduan umum, bukan pengganti anjuran dokter/bidan,
+              dan cuma berlaku untuk kehamilan satu janin (bukan kembar).
+            </HelpTip>
+          </h2>
+
+          <div className="weight-feature-card">
+            <div className="weight-feature-value">{latestWeightRow ? `${latestWeightRow.weight_kg}kg` : "—"}</div>
+            <div className="weight-feature-label">
+              Berat badan terakhir{latestWeightRow ? ` · ${latestWeightRow.date}` : ""}
+            </div>
+            {!weightFormOpen && (
+              <button type="button" className="weight-add-btn" onClick={openWeightForm}>+ Tambahkan berat</button>
+            )}
+          </div>
+
+          {weightFormOpen && (
+            <div className="manual-form">
+              <div className="manual-form-row">
+                <input
+                  type="number" inputMode="decimal" min="0" step="any" placeholder="Berat badan (kg)"
+                  value={weightDraft} onChange={(e) => setWeightDraft(e.target.value)}
+                />
+              </div>
+              {!weightDateOpen ? (
+                <button type="button" className="weight-date-toggle" onClick={() => setWeightDateOpen(true)}>
+                  Catat untuk tanggal lain (bukan hari ini)
+                </button>
+              ) : (
+                <div className="manual-form-row">
+                  <input type="date" value={weightFormDate} onChange={(e) => setWeightFormDate(e.target.value)} />
+                </div>
+              )}
+              {weightError && <div className="error-box"><AlertTriangle size={13} /> {weightError}</div>}
+              <div className="manual-form-actions">
+                <button className="manual-form-save" onClick={handleSaveWeight} disabled={weightSaving}>
+                  {weightSaving ? "Menyimpan…" : "Simpan"}
+                </button>
+                <button className="manual-form-cancel" onClick={closeWeightForm}>Batal</button>
+              </div>
+            </div>
+          )}
+
+          {latestWeightRow && !weightFormOpen && (
+            <div className="manual-form-actions" style={{ marginTop: 10 }}>
+              <ConfirmButton onConfirm={() => handleDeleteWeight(latestWeightRow.id)}>Hapus catatan terakhir</ConfirmButton>
+            </div>
+          )}
+
+          {!(prePregWeightKg && heightCm) ? (
+            <p className="format-hint">
+              <AlertTriangle size={14} />
+              <span>
+                Isi berat badan sebelum hamil & tinggi badan di panel di atas untuk melihat BMI
+                dan target kenaikan berat badan di sini.
+              </span>
+            </p>
+          ) : (
+            <div style={{ marginTop: 14 }}>
+              <p className="format-hint" style={{ marginTop: 0 }}>
+                BMI sebelum hamil: <strong>{bmi.toFixed(1)}</strong> ·{" "}
+                <span style={{ color: BMI_CATEGORY_META[bmiCat]?.color, fontWeight: 600 }}>
+                  {BMI_CATEGORY_META[bmiCat]?.label}
+                </span>{" "}
+                · Target kenaikan total: <strong>{totalGainRange[0]}–{totalGainRange[1]}kg</strong>
+              </p>
+              {actualGainLatest != null && expectedRangeLatest && gainStatusLatest && (
+                <p className="format-hint" style={{ marginTop: 6 }}>
+                  Kenaikan sejauh ini: <strong>{actualGainLatest >= 0 ? "+" : ""}{actualGainLatest.toFixed(1)}kg</strong>{" "}
+                  (target minggu ke-{gaForLatest.weeks}:{" "}
+                  {expectedRangeLatest.minKg.toFixed(1)}–{expectedRangeLatest.maxKg.toFixed(1)}kg) ·{" "}
+                  <span style={{ color: GAIN_STATUS_META[gainStatusLatest]?.color, fontWeight: 600 }}>
+                    {GAIN_STATUS_META[gainStatusLatest]?.label}
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
+
+          {weightLogs.length >= 2 && firstWeightRow && latestWeightRow && (
+            <div className="weight-range-bar">
+              <div className="weight-range-end">
+                <strong>{firstWeightRow.weight_kg}kg</strong>
+                <span>Mulai</span>
+              </div>
+              <div className="weight-range-line" />
+              <div className="weight-range-mid">
+                <strong>
+                  {latestWeightRow.weight_kg - firstWeightRow.weight_kg >= 0 ? "+" : ""}
+                  {(latestWeightRow.weight_kg - firstWeightRow.weight_kg).toFixed(1)}kg
+                </strong>
+                <span>Ubah</span>
+              </div>
+              <div className="weight-range-line" />
+              <div className="weight-range-end">
+                <strong>{latestWeightRow.weight_kg}kg</strong>
+                <span>Sekarang</span>
+              </div>
+            </div>
+          )}
+
+          <div className="divider" />
+
+          <h3>
+            Tren berat badan
+            <HelpTip>
+              Garis penuh = berat badanmu. Kalau BMI sebelum hamil & HPHT sudah diisi, dua garis
+              putus-putus menunjukkan rentang kenaikan berat badan yang diharapkan (panduan IOM) di
+              setiap tanggal — idealnya garis beratmu ada DI ANTARA keduanya.
+            </HelpTip>
+          </h3>
+          {weightLogs.length === 0 ? (
+            <div className="rings-empty">
+              <div style={{ color: "var(--lilac)" }}><Scale size={26} /></div>
+              <p>Belum ada catatan berat badan. Klik &quot;Tambahkan berat&quot; di atas untuk mulai.</p>
+            </div>
+          ) : (
+            <>
+              <div className="trend-svg-wrap">
+                <svg width={wtw} height={wth} viewBox={`0 0 ${wtw} ${wth}`}>
+                  {wGridTicks.map((v, i) => (
+                    <g key={i}>
+                      <line x1={wpadL} x2={wtw - wpadR} y1={wyPos(v)} y2={wyPos(v)} stroke="rgba(243,237,233,0.08)" strokeWidth="1" />
+                      <text x={wpadL - 8} y={wyPos(v) + 4} textAnchor="end" fill="#a591a3" fontSize="10">{v.toFixed(1)}kg</text>
+                    </g>
+                  ))}
+                  {weightTrendData.map((d, i) => (
+                    <text key={d.date} x={wxPos(i)} y={wth - wpadB + 18} textAnchor="middle" fill="#a591a3" fontSize="10">{d.date}</text>
+                  ))}
+                  {expectedMinPoints && <polyline points={expectedMinPoints} fill="none" stroke="#a591a3" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.6" />}
+                  {expectedMaxPoints && <polyline points={expectedMaxPoints} fill="none" stroke="#a591a3" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.6" />}
+                  <polyline points={weightPoints} fill="none" stroke="#C9A6D0" strokeWidth="2.5" />
+                  {weightTrendData.map((d, i) => <circle key={i} cx={wxPos(i)} cy={wyPos(d.weight)} r="3.5" fill="#C9A6D0" />)}
+                </svg>
+              </div>
+              <div className="legend">
+                <div className="legend-item"><span className="legend-dot" style={{ background: "#C9A6D0" }} />Berat badan</div>
+                {canShowGainBand && (
+                  <div className="legend-item"><span className="legend-dot" style={{ background: "#a591a3" }} />Rentang target (IOM)</div>
+                )}
+              </div>
+            </>
+          )}
+
+          <div className="divider" />
+
+          <h3>
+            Riwayat — peningkatan berat bulanan
+            <HelpTip>
+              Kenaikan berat badan per bulan, dibandingkan dengan bulan sebelumnya (atau berat
+              sebelum hamil untuk bulan pertama).
+            </HelpTip>
+          </h3>
+          {monthlyGain.length === 0 ? (
+            <div className="rings-empty">
+              <p>Belum cukup data untuk melihat peningkatan bulanan.</p>
+            </div>
+          ) : (
+            <div className="trend-svg-wrap">
+              <svg width={mtw} height={mth} viewBox={`0 0 ${mtw} ${mth}`}>
+                {mGridTicks.map((v, i) => (
+                  <g key={i}>
+                    <line x1={mpadL} x2={mtw - mpadR} y1={myPos(v)} y2={myPos(v)} stroke="rgba(243,237,233,0.08)" strokeWidth="1" />
+                    <text x={mpadL - 8} y={myPos(v) + 4} textAnchor="end" fill="#a591a3" fontSize="10">{v.toFixed(1)}kg</text>
+                  </g>
+                ))}
+                <line x1={mpadL} x2={mtw - mpadR} y1={mZeroY} y2={mZeroY} stroke="#F3EDE9" strokeWidth="1.2" opacity="0.4" />
+                {monthlyGain.map((d, i) => {
+                  const top = d.gainKg >= 0 ? myPos(d.gainKg) : mZeroY;
+                  const height = Math.abs(myPos(d.gainKg) - mZeroY);
+                  return (
+                    <rect
+                      key={d.month} x={mxCenter(i) - mBarWidth / 2} y={top} width={mBarWidth}
+                      height={Math.max(height, 1)} rx="3" fill="#E0A94A"
+                    />
+                  );
+                })}
+                {monthlyGain.map((d, i) => (
+                  <text key={d.month} x={mxCenter(i)} y={mth - mpadB + 18} textAnchor="middle" fill="#a591a3" fontSize="10">{d.month}</text>
+                ))}
+              </svg>
+            </div>
+          )}
         </div>
 
         {/* Calon nama bayi */}
@@ -563,7 +889,9 @@ export default function ProfilePage() {
       <p className="disclaimer">
         Usia kehamilan cuma perkiraan kalender (aturan Naegele: HPHT + 280 hari), bukan pengganti
         perhitungan USG dokter. Daftar calon nama bersifat pribadi dan cuma bisa diakses lewat
-        akunmu — cocok buat brainstorming nama bareng pasangan sebelum diputuskan.
+        akunmu — cocok buat brainstorming nama bareng pasangan sebelum diputuskan. Target kenaikan
+        berat badan mengikuti panduan umum IOM (2009) berdasarkan BMI sebelum hamil, cuma berlaku
+        untuk kehamilan satu janin, dan juga bukan anjuran medis personal.
       </p>
     </div>
   );
