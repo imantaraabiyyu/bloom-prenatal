@@ -56,6 +56,22 @@ alter table public.meals add constraint meals_source_check check (source in ('ma
 -- DHA & vitamin K — nutrisi tambahan yang dilacak (lihat NUTRIENT_ORDER di lib/nutrition.js).
 alter table public.meals add column if not exists dha_mg numeric default 0;
 alter table public.meals add column if not exists vitamin_k_mcg numeric default 0;
+-- Gula, natrium, kolesterol, lemak jenuh, kafein — nutrisi "batas harian"
+-- (ceiling-type, lihat LIMIT_ORDER di lib/nutrition.js): bukan target minimum
+-- seperti nutrisi di atas, tapi batas maksimum yang sebaiknya tidak dilewati.
+-- Baris lama otomatis bernilai 0 (tidak ada backfill data historis asli),
+-- sama seperti waktu dha_mg/vitamin_k_mcg ditambahkan di atas.
+alter table public.meals add column if not exists sugar_g numeric default 0;
+alter table public.meals add column if not exists sodium_mg numeric default 0;
+alter table public.meals add column if not exists cholesterol_mg numeric default 0;
+alter table public.meals add column if not exists saturated_fat_g numeric default 0;
+alter table public.meals add column if not exists caffeine_mg numeric default 0;
+-- Nutrisi/komposisi tambahan di luar daftar tetap di atas (mis. Omega-3,
+-- Zinc, Vitamin B6 dari label kemasan) — sama seperti vitamins.extra_nutrients
+-- di bawah; buildExtraNutrientsMap/mergeExtraNutrients (lib/nutrition.js)
+-- sudah generic dan dipakai bersama oleh meals & vitamins, tidak perlu
+-- fungsi terpisah.
+alter table public.meals add column if not exists extra_nutrients jsonb not null default '{}'::jsonb;
 
 -- 3) Katalog vitamin/suplemen milik pengguna
 create table if not exists public.vitamins (
@@ -74,6 +90,12 @@ create table if not exists public.vitamins (
 );
 alter table public.vitamins add column if not exists dha_mg numeric default 0;
 alter table public.vitamins add column if not exists vitamin_k_mcg numeric default 0;
+-- Batas harian (ceiling-type) — sama seperti pada meals di atas.
+alter table public.vitamins add column if not exists sugar_g numeric default 0;
+alter table public.vitamins add column if not exists sodium_mg numeric default 0;
+alter table public.vitamins add column if not exists cholesterol_mg numeric default 0;
+alter table public.vitamins add column if not exists saturated_fat_g numeric default 0;
+alter table public.vitamins add column if not exists caffeine_mg numeric default 0;
 -- Free-form nutrients not in the fixed list above (mis. Zinc, Vitamin B6,
 -- Iodium) — { [slug]: { label, unit, value } }, ditambahkan lewat form manual
 -- di dashboard (lihat lib/nutrition.js -> slugifyNutrientLabel/mergeExtraNutrients).

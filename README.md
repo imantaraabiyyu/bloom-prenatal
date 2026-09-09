@@ -312,12 +312,24 @@ itu diverifikasi manual lewat `npm run build` + uji coba nyata setelah deploy.
 - Nilai gizi contoh untuk Folamil Genio & Cavit D3 diambil dari label umum
   produk — sesuaikan dengan kemasan asli/anjuran dokter kamu lewat panel
   upload CSV vitamin di dashboard.
-- Kalau vitamin/suplemenmu punya kandungan yang tidak ada di daftar gizi utama
-  (mis. Zinc, Vitamin B6, Iodium), tambahkan lewat "+ Tambah nutrisi lain" di
-  form manual vitamin. Nutrisi ini ditampilkan sebagai catatan harian (jumlah
-  dari semua vitamin yang dicentang hari itu) tanpa target/ring — belum ada
-  patokan AKG bawaan untuk nutrisi bebas seperti ini. Belum didukung lewat
-  upload CSV, cuma lewat form manual.
+- Selain nutrisi "target minimum" di atas, Bloom juga melacak 5 nutrisi
+  "batas harian" (jangan dilewati): gula (25g), natrium (2300mg), kolesterol
+  (300mg), lemak jenuh (20g), dan kafein (200mg — khusus kehamilan). Angka ini
+  panduan umum dewasa/kehamilan (AHA/WHO/ACOG), bukan anjuran medis personal —
+  lihat panel "Batas harian" di dashboard, yang memberi peringatan kalau
+  salah satu terlewat hari ini (juga muncul di notifikasi pengingat 19:00
+  WIB kalau berlaku). Chat AI (bagian 5) ikut membaca kelima nutrisi ini dari
+  foto makanan/label kemasan, dan memberi verdict "aman/waspada/kurangi dulu"
+  yang mempertimbangkan asupanmu hari ini juga — nadanya sengaja dibuat
+  lembut, bukan peringatan medis yang menakutkan.
+- Kalau vitamin/suplemen ATAU menu makan yang kamu catat punya kandungan yang
+  tidak ada di daftar gizi utama (mis. Zinc, Vitamin B6, Omega-3, Iodium),
+  tambahkan lewat "+ Tambah nutrisi lain" di form manual (vitamin maupun
+  menu) — Chat AI juga bisa mengisi ini otomatis dari foto/label yang
+  dianalisis. Nutrisi ini ditampilkan sebagai catatan harian (jumlah dari
+  semua menu + vitamin yang tercatat/dicentang hari itu) tanpa target/ring —
+  belum ada patokan AKG bawaan untuk nutrisi bebas seperti ini. Belum
+  didukung lewat upload CSV, cuma lewat form manual atau Chat AI.
 - Data sekarang tersimpan di Supabase (Postgres) dengan Row Level Security,
   jauh lebih aman daripada versi localStorage sebelumnya — tapi tetap bukan
   aplikasi medis resmi, hanya alat bantu pencatatan pribadi.
