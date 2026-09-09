@@ -66,6 +66,12 @@ alter table public.meals add column if not exists sodium_mg numeric default 0;
 alter table public.meals add column if not exists cholesterol_mg numeric default 0;
 alter table public.meals add column if not exists saturated_fat_g numeric default 0;
 alter table public.meals add column if not exists caffeine_mg numeric default 0;
+-- Nutrisi/komposisi tambahan di luar daftar tetap di atas (mis. Omega-3,
+-- Zinc, Vitamin B6 dari label kemasan) — sama seperti vitamins.extra_nutrients
+-- di bawah; buildExtraNutrientsMap/mergeExtraNutrients (lib/nutrition.js)
+-- sudah generic dan dipakai bersama oleh meals & vitamins, tidak perlu
+-- fungsi terpisah.
+alter table public.meals add column if not exists extra_nutrients jsonb not null default '{}'::jsonb;
 
 -- 3) Katalog vitamin/suplemen milik pengguna
 create table if not exists public.vitamins (
