@@ -8,7 +8,7 @@ import MiniCalendar from "@/components/MiniCalendar";
 import HelpTip from "@/components/HelpTip";
 import {
   Home, NotebookText, MessageCircle, User, UtensilsCrossed, Pill, Droplet,
-  Sprout, X, Check, AlertTriangle,
+  Sprout, X, Check, AlertTriangle, Scale,
 } from "lucide-react";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
@@ -18,7 +18,11 @@ import {
   groupMealsByDay, dedupeMeals, todayISO,
   statusForPct, limitStatusForPct, exceededLimitLabels, mergeExtraNutrients, buildExtraNutrientsMap,
 } from "@/lib/nutrition";
-import { trimesterForDate } from "@/lib/pregnancy";
+import { trimesterForDate, computeGestationalAge } from "@/lib/pregnancy";
+import {
+  computeBMI, bmiCategory, BMI_CATEGORY_META, TOTAL_GAIN_RANGE_KG,
+  expectedGainRangeAtWeek, gainStatusForWeek, GAIN_STATUS_META,
+} from "@/lib/weight";
 
 function downloadText(filename, text) {
   const blob = new Blob([text], { type: "text/csv" });
@@ -39,9 +43,14 @@ export default function Dashboard() {
   // Trimester is no longer a manual choice — it's derived from HPHT (set in
   // Profil) + whichever date is being viewed, see the `trimester` const below.
   const [hpht, setHpht] = useState(null);
+  // Pre-pregnancy weight/height (set in Profil) — used for the BMI/IOM gain
+  // range in the weight panel below, never for anything else here.
+  const [prePregWeightKg, setPrePregWeightKg] = useState(null);
+  const [heightCm, setHeightCm] = useState(null);
   const [meals, setMeals] = useState([]);
   const [vitamins, setVitamins] = useState([]);
   const [vitaminChecks, setVitaminChecks] = useState({}); // { date: { vitaminId: true } }
+  const [weightLogs, setWeightLogs] = useState([]); // [{ id, date, weight_kg }] — one row per date
   const [dayIndex, setDayIndex] = useState(0);
   const [extraDates, setExtraDates] = useState([]); // dates jumped-to via the date picker that have no data yet
   const [pendingJumpDate, setPendingJumpDate] = useState(null);
@@ -77,6 +86,14 @@ export default function Dashboard() {
   const [waterSaving, setWaterSaving] = useState(false);
   const [waterError, setWaterError] = useState("");
 
+  // weight log — a single kg value for the viewed date (upsert, not
+  // additive, unlike water), plus a small date field so a past day can be
+  // backfilled/corrected (mirrors the meal form's date input).
+  const [weightDraft, setWeightDraft] = useState("");
+  const [weightFormDate, setWeightFormDate] = useState(todayISO());
+  const [weightSaving, setWeightSaving] = useState(false);
+  const [weightError, setWeightError] = useState("");
+
   // ---------------- bootstrap ----------------
   useEffect(() => {
     if (!supabase) { router.replace("/login"); return; }
@@ -93,6 +110,8 @@ export default function Dashboard() {
         profile = created;
       }
       setHpht(profile?.hpht || null);
+      setPrePregWeightKg(profile?.pre_pregnancy_weight_kg ?? null);
+      setHeightCm(profile?.height_cm ?? null);
 
       // vitamins catalog (seed defaults if empty)
       let { data: vitRows } = await supabase.from("vitamins").select("*").eq("user_id", u.id).order("created_at", { ascending: true });
@@ -116,6 +135,10 @@ export default function Dashboard() {
       });
       setVitaminChecks(map);
 
+      // weight log
+      const { data: weightRows } = await supabase.from("weight_logs").select("*").eq("user_id", u.id).order("date", { ascending: true });
+      setWeightLogs(weightRows || []);
+
       setLoading(false);
     })();
   }, [supabase, router]);
@@ -132,10 +155,11 @@ export default function Dashboard() {
     const set = new Set();
     meals.forEach((r) => set.add(r.date));
     Object.keys(vitaminChecks).forEach((d) => set.add(d));
+    weightLogs.forEach((w) => set.add(w.date));
     extraDates.forEach((d) => set.add(d));
     set.add(todayISO());
     return Array.from(set).sort();
-  }, [meals, vitaminChecks, extraDates]);
+  }, [meals, vitaminChecks, weightLogs, extraDates]);
 
   // Once a jumped-to date has been folded into `dates` above, land the
   // day-nav on it (can't compute the index synchronously — `dates` only
@@ -184,8 +208,9 @@ export default function Dashboard() {
     const set = new Set();
     meals.forEach((r) => set.add(r.date));
     Object.keys(vitaminChecks).forEach((d) => set.add(d));
+    weightLogs.forEach((w) => set.add(w.date));
     return set;
-  }, [meals, vitaminChecks]);
+  }, [meals, vitaminChecks, weightLogs]);
 
   // Keeps the calendar showing the month of whatever day is currently
   // selected — e.g. after "Hari ini" or picking a date in a different month.
@@ -259,6 +284,42 @@ export default function Dashboard() {
   const waterTarget = targets.water_ml;
   const waterPct = waterTarget ? (waterTotal / waterTarget) * 100 : 0;
   const waterStatus = statusForPct(waterPct);
+
+  // ---------------- weight ----------------
+  // One row per date (upsert, not summed — see supabase/schema.sql's
+  // unique(user_id,date) on weight_logs), unlike mealsByDay's per-day sums.
+  const weightByDate = useMemo(() => {
+    const map = {};
+    weightLogs.forEach((w) => { map[w.date] = w; });
+    return map;
+  }, [weightLogs]);
+  const datesWithWeight = dates.filter((d) => weightByDate[d] != null);
+  const todaysWeightRow = currentDate ? weightByDate[currentDate] : null;
+
+  // Keeps the weight quick-form pointed at whichever day is currently viewed
+  // (same idea as the calendarMonth-sync effect above) -- prefills the
+  // existing value for that day if there is one, so re-opening a past day
+  // shows/edits what's already there instead of always starting blank.
+  useEffect(() => {
+    if (!currentDate) return;
+    setWeightFormDate(currentDate);
+    setWeightDraft(weightByDate[currentDate] != null ? String(weightByDate[currentDate].weight_kg) : "");
+    setWeightError("");
+  }, [currentDate, weightByDate]);
+
+  // PRE-PREGNANCY BMI (see the important caveat on bmiCategory in
+  // lib/weight.js) — never computed from a weightLogs row.
+  const bmi = useMemo(() => computeBMI(prePregWeightKg, heightCm), [prePregWeightKg, heightCm]);
+  const bmiCat = bmiCategory(bmi);
+  const totalGainRange = bmiCat ? TOTAL_GAIN_RANGE_KG[bmiCat] : null;
+
+  // Gestational week for whichever date is currently viewed (same `hpht`
+  // `trimester` above already derives from) — used only to look up that
+  // date's expected gain-so-far range, nothing else.
+  const gaForCurrentDate = currentDate ? computeGestationalAge(hpht, currentDate) : null;
+  const expectedRangeToday = gaForCurrentDate ? expectedGainRangeAtWeek(bmiCat, gaForCurrentDate.weeks) : null;
+  const actualGainToday = (todaysWeightRow && prePregWeightKg != null) ? todaysWeightRow.weight_kg - prePregWeightKg : null;
+  const gainStatusToday = actualGainToday != null ? gainStatusForWeek(actualGainToday, expectedRangeToday) : null;
 
   // ---------------- actions ----------------
   async function handleMealFile(file) {
@@ -374,6 +435,31 @@ export default function Dashboard() {
     if (!amt || amt <= 0) { setWaterError("Masukkan jumlah ml yang valid."); return; }
     addWater(amt);
     setWaterAmount("");
+  }
+
+  // ---------------- weight log ----------------
+  // Upsert on (user_id, date) -- logging again for a date already saved
+  // overwrites its value instead of creating a duplicate row (see
+  // supabase/schema.sql's unique(user_id, date) on weight_logs).
+  async function handleSaveWeight() {
+    setWeightError("");
+    const kg = parseFloat(weightDraft);
+    if (!kg || kg <= 0) { setWeightError("Masukkan berat badan (kg) yang valid."); return; }
+    if (!weightFormDate) { setWeightError("Pilih tanggal untuk catatan ini."); return; }
+    setWeightSaving(true);
+    const { data, error } = await supabase
+      .from("weight_logs")
+      .upsert({ user_id: user.id, date: weightFormDate, weight_kg: kg }, { onConflict: "user_id,date" })
+      .select()
+      .maybeSingle();
+    setWeightSaving(false);
+    if (error) { setWeightError(error.message); return; }
+    setWeightLogs((prev) => [...prev.filter((w) => w.date !== weightFormDate), data].sort((a, b) => a.date.localeCompare(b.date)));
+  }
+
+  async function handleDeleteWeight(id) {
+    setWeightLogs((prev) => prev.filter((w) => w.id !== id));
+    await supabase.from("weight_logs").delete().eq("id", id);
   }
 
   // ---------------- manual vitamin entry ----------------
@@ -519,6 +605,52 @@ export default function Dashboard() {
   const lxPos = (i) => lpadL + (limitTrendData.length === 1 ? lplotW / 2 : (i / (limitTrendData.length - 1)) * lplotW);
   const lyPos = (v) => lpadT + lplotH - (v / lmaxVal) * lplotH;
   const lgridTicks = [0, 25, 50, 75, 100, 125].filter((v) => v <= lmaxVal);
+
+  // Weight trend geometry — a third hand-rolled block, structurally similar
+  // to the two above but a genuinely different shape: ONE raw-kg series
+  // (not one line per tracked nutrient key), over datesWithWeight (not
+  // datesWithMeals), with a dynamic kg axis (not a fixed 0–100%+ one) since
+  // there's no natural "target = 100%" for an absolute weight value. When a
+  // BMI category + HPHT are both known, an extra shaded/dashed expected-gain
+  // band renders alongside the actual line, so "am I on track" is readable
+  // at a glance across the whole trend, not just for the viewed day.
+  const canShowGainBand = !!(bmiCat && hpht && prePregWeightKg != null);
+  const weightTrendData = datesWithWeight.map((d) => {
+    const row = weightByDate[d];
+    let expectedMinKg = null, expectedMaxKg = null;
+    if (canShowGainBand) {
+      const ga = computeGestationalAge(hpht, d);
+      const expected = ga ? expectedGainRangeAtWeek(bmiCat, ga.weeks) : null;
+      if (expected) {
+        expectedMinKg = prePregWeightKg + expected.minKg;
+        expectedMaxKg = prePregWeightKg + expected.maxKg;
+      }
+    }
+    return { date: d, weight: Number(row.weight_kg), expectedMinKg, expectedMaxKg };
+  });
+  const wtw = Math.max(560, weightTrendData.length * 90), wth = 300;
+  const wpadL = 44, wpadR = 16, wpadT = 16, wpadB = 34;
+  const wplotW = wtw - wpadL - wpadR, wplotH = wth - wpadT - wpadB;
+  let wMinVal = Infinity, wMaxVal = -Infinity;
+  weightTrendData.forEach((d) => {
+    [d.weight, d.expectedMinKg, d.expectedMaxKg].forEach((v) => {
+      if (v != null) { if (v < wMinVal) wMinVal = v; if (v > wMaxVal) wMaxVal = v; }
+    });
+  });
+  if (!Number.isFinite(wMinVal)) { wMinVal = 0; wMaxVal = 1; } // defensive — panel itself is gated on length > 1
+  const wSpan = Math.max(wMaxVal - wMinVal, 1);
+  const wValPad = wSpan * 0.15;
+  wMinVal -= wValPad; wMaxVal += wValPad;
+  const wxPos = (i) => wpadL + (weightTrendData.length === 1 ? wplotW / 2 : (i / (weightTrendData.length - 1)) * wplotW);
+  const wyPos = (v) => wpadT + wplotH - ((v - wMinVal) / (wMaxVal - wMinVal)) * wplotH;
+  const wTickCount = 4;
+  const wGridTicks = Array.from({ length: wTickCount + 1 }, (_, i) => wMinVal + (i * (wMaxVal - wMinVal)) / wTickCount);
+  const weightPoints = weightTrendData.map((d, i) => `${wxPos(i)},${wyPos(d.weight)}`).join(" ");
+  // Points with a null expected value (e.g. a date before HPHT) are simply
+  // omitted from these two polylines — still positioned by their real index
+  // via wxPos(i), so the rest of the band doesn't compress/shift.
+  const expectedMinPoints = weightTrendData.map((d, i) => (d.expectedMinKg != null ? `${wxPos(i)},${wyPos(d.expectedMinKg)}` : null)).filter(Boolean).join(" ");
+  const expectedMaxPoints = weightTrendData.map((d, i) => (d.expectedMaxKg != null ? `${wxPos(i)},${wyPos(d.expectedMaxKg)}` : null)).filter(Boolean).join(" ");
 
   return (
     <div className="wrap">
@@ -970,6 +1102,77 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Berat badan — satu nilai per tanggal (upsert), bukan kumulatif
+            seperti Cairan di atas; lihat handleSaveWeight. */}
+        {currentDate && (
+          <div className="panel full">
+            <h2>
+              <Scale size={18} /> Berat badan — {currentDate}
+              <HelpTip label="Soal target kenaikan berat badan">
+                Target kenaikan (panduan IOM 2009) dihitung dari BMI sebelum hamil — isi berat
+                badan sebelum hamil & tinggi badan di tab Profil untuk melihatnya di sini. Panduan
+                umum, bukan pengganti anjuran dokter/bidan, dan cuma berlaku untuk kehamilan satu
+                janin (bukan kembar).
+              </HelpTip>
+            </h2>
+            <div className="water-widget">
+              <div className="water-widget-label">
+                <span>Berat badan tanggal ini</span>
+                <span className="water-widget-value">
+                  {todaysWeightRow ? `${todaysWeightRow.weight_kg}kg` : "Belum dicatat"}
+                </span>
+              </div>
+              <div className="water-custom-row">
+                <input type="date" value={weightFormDate} onChange={(e) => setWeightFormDate(e.target.value)} />
+                <input
+                  type="number" inputMode="decimal" min="0" step="any" placeholder="Berat badan (kg)"
+                  value={weightDraft} onChange={(e) => setWeightDraft(e.target.value)}
+                />
+                <button onClick={handleSaveWeight} disabled={weightSaving}>
+                  {weightSaving ? "Menyimpan…" : "Simpan"}
+                </button>
+              </div>
+              {weightError && <div className="error-box"><AlertTriangle size={13} /> {weightError}</div>}
+              {todaysWeightRow && (
+                <div className="manual-form-actions" style={{ marginTop: 8 }}>
+                  <ConfirmButton onConfirm={() => handleDeleteWeight(todaysWeightRow.id)}>Hapus catatan tanggal ini</ConfirmButton>
+                </div>
+              )}
+            </div>
+
+            {!(prePregWeightKg && heightCm) ? (
+              <p className="format-hint">
+                <AlertTriangle size={14} />
+                <span>
+                  Isi berat badan sebelum hamil & tinggi badan di{" "}
+                  <Link href="/dashboard/profile">tab Profil</Link> untuk melihat BMI dan target
+                  kenaikan berat badan di sini.
+                </span>
+              </p>
+            ) : (
+              <div style={{ marginTop: 14 }}>
+                <p className="format-hint" style={{ marginTop: 0 }}>
+                  BMI sebelum hamil: <strong>{bmi.toFixed(1)}</strong> ·{" "}
+                  <span style={{ color: BMI_CATEGORY_META[bmiCat]?.color, fontWeight: 600 }}>
+                    {BMI_CATEGORY_META[bmiCat]?.label}
+                  </span>{" "}
+                  · Target kenaikan total: <strong>{totalGainRange[0]}–{totalGainRange[1]}kg</strong>
+                </p>
+                {actualGainToday != null && expectedRangeToday && gainStatusToday && (
+                  <p className="format-hint" style={{ marginTop: 6 }}>
+                    Kenaikan sejauh ini: <strong>{actualGainToday >= 0 ? "+" : ""}{actualGainToday.toFixed(1)}kg</strong>{" "}
+                    (target minggu ke-{gaForCurrentDate.weeks}:{" "}
+                    {expectedRangeToday.minKg.toFixed(1)}–{expectedRangeToday.maxKg.toFixed(1)}kg) ·{" "}
+                    <span style={{ color: GAIN_STATUS_META[gainStatusToday]?.color, fontWeight: 600 }}>
+                      {GAIN_STATUS_META[gainStatusToday]?.label}
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Nutrient list */}
         {currentDate && activeNutrients.length > 0 && (
           <div className="panel full" id="nutrient-detail">
@@ -1113,6 +1316,45 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Tren berat badan — a third hand-rolled trend block (see the
+            weightTrendData geometry above): raw kg, not a %, over
+            datesWithWeight, plus an optional shaded expected-gain band. */}
+        {datesWithWeight.length > 1 && (
+          <div className="panel full">
+            <h3>
+              <Scale size={16} /> Tren berat badan
+              <HelpTip>
+                Garis penuh = berat badanmu. Kalau BMI sebelum hamil & HPHT sudah diisi, dua garis
+                putus-putus menunjukkan rentang kenaikan berat badan yang diharapkan (panduan IOM)
+                di setiap tanggal — idealnya garis beratmu ada DI ANTARA keduanya.
+              </HelpTip>
+            </h3>
+            <div className="trend-svg-wrap">
+              <svg width={wtw} height={wth} viewBox={`0 0 ${wtw} ${wth}`}>
+                {wGridTicks.map((v, i) => (
+                  <g key={i}>
+                    <line x1={wpadL} x2={wtw - wpadR} y1={wyPos(v)} y2={wyPos(v)} stroke="rgba(243,237,233,0.08)" strokeWidth="1" />
+                    <text x={wpadL - 8} y={wyPos(v) + 4} textAnchor="end" fill="#a591a3" fontSize="10">{v.toFixed(1)}kg</text>
+                  </g>
+                ))}
+                {weightTrendData.map((d, i) => (
+                  <text key={d.date} x={wxPos(i)} y={wth - wpadB + 18} textAnchor="middle" fill="#a591a3" fontSize="10">{d.date}</text>
+                ))}
+                {expectedMinPoints && <polyline points={expectedMinPoints} fill="none" stroke="#a591a3" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.6" />}
+                {expectedMaxPoints && <polyline points={expectedMaxPoints} fill="none" stroke="#a591a3" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.6" />}
+                <polyline points={weightPoints} fill="none" stroke="#C9A6D0" strokeWidth="2.5" />
+                {weightTrendData.map((d, i) => <circle key={i} cx={wxPos(i)} cy={wyPos(d.weight)} r="3.5" fill="#C9A6D0" />)}
+              </svg>
+            </div>
+            <div className="legend">
+              <div className="legend-item"><span className="legend-dot" style={{ background: "#C9A6D0" }} />Berat badan</div>
+              {canShowGainBand && (
+                <div className="legend-item"><span className="legend-dot" style={{ background: "#a591a3" }} />Rentang target (IOM)</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* History */}
         {datesWithMeals.length > 0 && (
           <div className="panel full">
@@ -1150,7 +1392,9 @@ export default function Dashboard() {
         Target gizi yang ditampilkan adalah panduan umum untuk kehamilan dewasa per trimester,
         bukan anjuran personal. Kebutuhan bisa berbeda tergantung usia, berat badan sebelum hamil,
         aktivitas, dan kondisi seperti anemia atau diabetes gestasional — konsultasikan detailnya
-        dengan dokter/bidan kamu.
+        dengan dokter/bidan kamu. Target kenaikan berat badan mengikuti panduan umum IOM (2009)
+        berdasarkan BMI sebelum hamil, cuma berlaku untuk kehamilan satu janin, dan juga bukan
+        anjuran medis personal.
       </p>
     </div>
   );
