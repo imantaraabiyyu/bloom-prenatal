@@ -20,7 +20,7 @@ pribadi/keluarga, dan tetap di-deploy ke Vercel.
 2. Copy-paste seluruh isi file `supabase/schema.sql` yang ada di folder ini.
 3. Klik **Run**. Ini akan membuat tabel-tabel (`profiles`, `meals`, `vitamins`,
    `vitamin_checks`, `journal_entries`, `journal_attachments`, `baby_names`,
-   `chat_messages`) lengkap dengan Row Level Security — jadi tiap pengguna
+   `chat_messages`, `weight_logs`) lengkap dengan Row Level Security — jadi tiap pengguna
    hanya bisa lihat & ubah datanya sendiri — **dan** sebuah Storage bucket
    privat `journal-media` (untuk foto/video/voice note di jurnal) dengan batas
    45MB per file dan RLS yang sama (per-pemilik). Aman dijalankan ulang kalau
