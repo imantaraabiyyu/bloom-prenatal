@@ -12,9 +12,11 @@ import {
 } from "lucide-react";
 import {
   TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
+  LIMITS, LIMIT_META, LIMIT_ORDER, ALL_TRACKED_NUTRIENTS, ALL_TRACKED_META,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
-  parseMealCsv, parseVitaminCsv, computeActiveNutrients, groupMealsByDay, dedupeMeals, todayISO,
-  statusForPct, mergeExtraNutrients, buildExtraNutrientsMap,
+  parseMealCsv, parseVitaminCsv, computeActiveNutrients, computeActiveLimitNutrients,
+  groupMealsByDay, dedupeMeals, todayISO,
+  statusForPct, limitStatusForPct, exceededLimitLabels, mergeExtraNutrients, buildExtraNutrientsMap,
 } from "@/lib/nutrition";
 import { trimesterForDate } from "@/lib/pregnancy";
 
@@ -58,6 +60,7 @@ export default function Dashboard() {
   const [mealFormDate, setMealFormDate] = useState(todayISO());
   const [mealFormName, setMealFormName] = useState("");
   const [mealFormValues, setMealFormValues] = useState({});
+  const [mealFormExtra, setMealFormExtra] = useState([]); // [{ label, unit, value }] — nutrients outside ALL_TRACKED_NUTRIENTS
   const [mealFormSaving, setMealFormSaving] = useState(false);
   const [mealFormError, setMealFormError] = useState("");
 
@@ -65,7 +68,7 @@ export default function Dashboard() {
   const [vitFormOpen, setVitFormOpen] = useState(false);
   const [vitFormName, setVitFormName] = useState("");
   const [vitFormValues, setVitFormValues] = useState({});
-  const [vitFormExtra, setVitFormExtra] = useState([]); // [{ label, unit, value }] — nutrients outside NUTRIENT_ORDER
+  const [vitFormExtra, setVitFormExtra] = useState([]); // [{ label, unit, value }] — nutrients outside ALL_TRACKED_NUTRIENTS
   const [vitFormSaving, setVitFormSaving] = useState(false);
   const [vitFormError, setVitFormError] = useState("");
 
@@ -198,6 +201,11 @@ export default function Dashboard() {
   const trimester = trimesterForDate(hpht, currentDate || todayISO());
   const targets = TARGETS[trimester];
   const activeNutrients = useMemo(() => computeActiveNutrients(meals), [meals]);
+  // LIMIT_ORDER mirror of activeNutrients above -- kept as its own list (not
+  // folded into activeNutrients) since it drives a separate "Batas harian"
+  // section, not the floor-type rings/trend/summary (see LIMIT_ORDER's own
+  // comment in lib/nutrition.js for why the two never mix).
+  const activeLimitNutrients = useMemo(() => computeActiveLimitNutrients(meals), [meals]);
   const mealsByDay = useMemo(() => groupMealsByDay(meals), [meals]);
 
   function dayTotals(date) {
@@ -211,16 +219,39 @@ export default function Dashboard() {
     return totals;
   }
 
-  // Custom (non-NUTRIENT_ORDER) nutrients from every checked vitamin that
-  // day — informational only, no target/ring (see lib/nutrition.js).
+  // Ceiling-type ("batas harian") mirror of dayTotals above -- reads
+  // LIMIT_ORDER off the same mealsByDay cache (groupMealsByDay now sums
+  // both lists), plus every checked vitamin's LIMIT_ORDER fields.
+  function dayLimitTotals(date) {
+    const base = mealsByDay[date] || {};
+    const totals = {};
+    LIMIT_ORDER.forEach((n) => { totals[n] = base[n] || 0; });
+    const checks = vitaminChecks[date] || {};
+    vitamins.forEach((v) => {
+      if (checks[v.id]) LIMIT_ORDER.forEach((n) => { if (v[n] != null) totals[n] += Number(v[n]); });
+    });
+    return totals;
+  }
+
+  // Custom (non-ALL_TRACKED_NUTRIENTS) nutrients from every checked vitamin
+  // AND every meal logged that day — meals gained their own extra_nutrients
+  // column alongside vitamins' (supabase/schema.sql), so an ad-hoc
+  // composition fact Gemini found on a food label shows up here too.
+  // Informational only, no target/ring (see lib/nutrition.js).
   function extraTotals(date) {
     const checks = vitaminChecks[date] || {};
     const merged = {};
     vitamins.forEach((v) => { if (checks[v.id]) mergeExtraNutrients(merged, v.extra_nutrients); });
+    meals.forEach((m) => { if (m.date === date) mergeExtraNutrients(merged, m.extra_nutrients); });
     return merged;
   }
 
   const totals = currentDate ? dayTotals(currentDate) : {};
+  const limitTotals = currentDate ? dayLimitTotals(currentDate) : {};
+  // Single source of truth (lib/nutrition.js) shared with the dinner-reminder
+  // trigger (app/api/cron/reminders/route.js) — same "what counts as
+  // exceeded" math on both the Dashboard and the notification.
+  const exceededToday = exceededLimitLabels(limitTotals);
   const todaysExtraTotals = currentDate ? extraTotals(currentDate) : {};
   const datesWithMeals = dates.filter((d) => meals.some((r) => r.date === d));
   const todaysMeals = currentDate ? meals.filter((r) => r.date === currentDate) : [];
@@ -263,7 +294,7 @@ export default function Dashboard() {
     }
     const rows = parsed.map((v) => {
       const full = { name: v.name, user_id: user.id };
-      NUTRIENT_ORDER.forEach((n) => { full[n] = v[n] || 0; });
+      ALL_TRACKED_NUTRIENTS.forEach((n) => { full[n] = v[n] || 0; });
       return full;
     });
     const { data, error } = await supabase.from("vitamins").insert(rows).select();
@@ -278,12 +309,26 @@ export default function Dashboard() {
     setMealFormDate(currentDate || todayISO());
     setMealFormName("");
     setMealFormValues({});
+    setMealFormExtra([]);
     setMealFormError("");
   }
 
   function closeMealForm() {
     setMealFormOpen(false);
     setMealFormError("");
+  }
+
+  // "nutrisi lain" rows for the meal form — same pattern as
+  // addVitExtraRow/updateVitExtraRow/removeVitExtraRow below, for anything
+  // not in ALL_TRACKED_NUTRIENTS (e.g. Omega-3 printed on a food label).
+  function addMealExtraRow() {
+    setMealFormExtra((prev) => [...prev, { label: "", unit: "", value: "" }]);
+  }
+  function updateMealExtraRow(idx, field, value) {
+    setMealFormExtra((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+  function removeMealExtraRow(idx) {
+    setMealFormExtra((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function handleAddMeal() {
@@ -293,16 +338,18 @@ export default function Dashboard() {
     if (!mealFormDate) { setMealFormError("Pilih tanggal untuk menu ini."); return; }
     setMealFormSaving(true);
     const row = { user_id: user.id, date: mealFormDate, meal: name };
-    NUTRIENT_ORDER.forEach((n) => {
+    ALL_TRACKED_NUTRIENTS.forEach((n) => {
       const v = parseFloat(mealFormValues[n]);
       row[n] = isNaN(v) ? 0 : v;
     });
+    row.extra_nutrients = buildExtraNutrientsMap(mealFormExtra);
     const { data, error } = await supabase.from("meals").insert(row).select().maybeSingle();
     setMealFormSaving(false);
     if (error) { setMealFormError(error.message); return; }
     setMeals((prev) => [...prev, data]);
     setMealFormName("");
     setMealFormValues({});
+    setMealFormExtra([]);
   }
 
   async function handleDeleteMeal(id) {
@@ -343,7 +390,7 @@ export default function Dashboard() {
     setVitFormError("");
   }
 
-  // "nutrisi lain" rows — anything not in NUTRIENT_ORDER (Zinc, Vitamin B6, ...)
+  // "nutrisi lain" rows — anything not in ALL_TRACKED_NUTRIENTS (Zinc, Vitamin B6, ...)
   function addVitExtraRow() {
     setVitFormExtra((prev) => [...prev, { label: "", unit: "", value: "" }]);
   }
@@ -360,7 +407,7 @@ export default function Dashboard() {
     if (!name) { setVitFormError("Isi dulu nama vitamin/suplemennya."); return; }
     setVitFormSaving(true);
     const row = { user_id: user.id, name };
-    NUTRIENT_ORDER.forEach((n) => {
+    ALL_TRACKED_NUTRIENTS.forEach((n) => {
       const v = parseFloat(vitFormValues[n]);
       row[n] = isNaN(v) ? 0 : v;
     });
@@ -451,6 +498,28 @@ export default function Dashboard() {
   const yPos = (v) => padT + plotH - (v / maxVal) * plotH;
   const gridTicks = [0, 25, 50, 75, 100, 125].filter((v) => v <= maxVal);
 
+  // "batas harian" trend geometry — structurally mirrors the trend geometry
+  // above but computed from dayLimitTotals/LIMITS (ceiling-type, % of a daily
+  // limit) instead of dayTotals/targets (floor-type, % of a daily target).
+  // Kept as its own parallel block rather than a shared/generic helper — see
+  // LIMIT_ORDER's own comment in lib/nutrition.js for why floor and ceiling
+  // stay separate instead of averaging together.
+  const limitTrendData = datesWithMeals.map((d) => {
+    const t = dayLimitTotals(d);
+    const out = { date: d };
+    activeLimitNutrients.forEach((n) => { out[n] = LIMITS[n] ? (t[n] || 0) / LIMITS[n] * 100 : 0; });
+    return out;
+  });
+  const ltw = Math.max(560, limitTrendData.length * 90), lth = 300;
+  const lpadL = 40, lpadR = 16, lpadT = 16, lpadB = 34;
+  const lplotW = ltw - lpadL - lpadR, lplotH = lth - lpadT - lpadB;
+  let lmaxVal = 100;
+  limitTrendData.forEach((d) => activeLimitNutrients.forEach((n) => { if (d[n] > lmaxVal) lmaxVal = d[n]; }));
+  lmaxVal = Math.ceil(lmaxVal / 20) * 20 + 20;
+  const lxPos = (i) => lpadL + (limitTrendData.length === 1 ? lplotW / 2 : (i / (limitTrendData.length - 1)) * lplotW);
+  const lyPos = (v) => lpadT + lplotH - (v / lmaxVal) * lplotH;
+  const lgridTicks = [0, 25, 50, 75, 100, 125].filter((v) => v <= lmaxVal);
+
   return (
     <div className="wrap">
       <div className="topbar">
@@ -495,6 +564,17 @@ export default function Dashboard() {
         )}
       </div>
 
+      {currentDate && exceededToday.length > 0 && (
+        <div className="limit-warning-banner">
+          <AlertTriangle size={16} />
+          <span>
+            ⚠️ Sudah melebihi batas harian {currentDate}: <strong>{exceededToday.join(", ")}</strong>.
+            Coba dikurangi dulu untuk sisa hari ini ya — lihat detailnya di panel &quot;Batas
+            harian&quot; di bawah.
+          </span>
+        </div>
+      )}
+
       {activeNutrients.length > 0 && (
         <div className="summary-row">
           <div className="summary-card"><div className="big">{Math.round(avg)}%</div><div className="lbl">Rata-rata tercapai</div></div>
@@ -516,8 +596,10 @@ export default function Dashboard() {
               <HelpTip label="Format kolom CSV">
                 Kolom yang dikenali: <code>date</code>, <code>meal</code>, <code>calories</code>, <code>protein_g</code>,{" "}
                 <code>iron_mg</code>, <code>calcium_mg</code>, <code>folate_mcg</code>, <code>vitamin_d_mcg</code>,{" "}
-                <code>fiber_g</code>, <code>water_ml</code>, <code>dha_mg</code>, <code>vitamin_k_mcg</code>. Baris dengan
-                tanggal sama akan dijumlahkan otomatis.
+                <code>fiber_g</code>, <code>water_ml</code>, <code>dha_mg</code>, <code>vitamin_k_mcg</code>, plus kolom
+                batas harian <code>sugar_g</code>, <code>sodium_mg</code>, <code>cholesterol_mg</code>,{" "}
+                <code>saturated_fat_g</code>, <code>caffeine_mg</code>. Baris dengan tanggal sama akan dijumlahkan
+                otomatis.
               </HelpTip>
             </h2>
             <label className="upload-drop" {...makeDropHandlers(handleMealFile)}>
@@ -557,6 +639,50 @@ export default function Dashboard() {
                     );
                   })}
                 </div>
+
+                <label className="extra-nutrient-label">Batas harian (opsional) — gula, natrium, dll.</label>
+                <div className="manual-form-grid">
+                  {LIMIT_ORDER.map((n) => {
+                    const meta = LIMIT_META[n];
+                    return (
+                      <div className="manual-form-field" key={n}>
+                        <label>{meta.label} ({meta.unit})</label>
+                        <input
+                          type="number" inputMode="decimal" min="0" step="any" placeholder="0"
+                          value={mealFormValues[n] ?? ""}
+                          onChange={(e) => setMealFormValues((prev) => ({ ...prev, [n]: e.target.value }))}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="extra-nutrient-section">
+                  <label className="extra-nutrient-label">Nutrisi lain (opsional) — kalau ada yang tidak ada di daftar di atas, mis. Omega-3, Zinc, Vitamin B6</label>
+                  {mealFormExtra.length > 0 && (
+                    <div className="extra-nutrient-list">
+                      {mealFormExtra.map((r, i) => (
+                        <div className="extra-nutrient-row" key={i}>
+                          <input
+                            type="text" placeholder="Nama (mis. Omega-3)"
+                            value={r.label} onChange={(e) => updateMealExtraRow(i, "label", e.target.value)}
+                          />
+                          <input
+                            type="number" inputMode="decimal" min="0" step="any" placeholder="Jumlah"
+                            value={r.value} onChange={(e) => updateMealExtraRow(i, "value", e.target.value)}
+                          />
+                          <input
+                            type="text" placeholder="Satuan (mis. mg)"
+                            value={r.unit} onChange={(e) => updateMealExtraRow(i, "unit", e.target.value)}
+                          />
+                          <button type="button" onClick={() => removeMealExtraRow(i)} title="Hapus baris ini"><X size={15} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button type="button" className="extra-nutrient-add" onClick={addMealExtraRow}>+ Tambah nutrisi lain</button>
+                </div>
+
                 {mealFormError && <div className="error-box"><AlertTriangle size={13} /> {mealFormError}</div>}
                 <div className="manual-form-actions">
                   <button className="manual-form-save" onClick={handleAddMeal} disabled={mealFormSaving}>
@@ -600,6 +726,23 @@ export default function Dashboard() {
                 <div className="manual-form-grid">
                   {NUTRIENT_ORDER.map((n) => {
                     const meta = NUTRIENT_META[n];
+                    return (
+                      <div className="manual-form-field" key={n}>
+                        <label>{meta.label} ({meta.unit})</label>
+                        <input
+                          type="number" inputMode="decimal" min="0" step="any" placeholder="0"
+                          value={vitFormValues[n] ?? ""}
+                          onChange={(e) => setVitFormValues((prev) => ({ ...prev, [n]: e.target.value }))}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <label className="extra-nutrient-label">Batas harian (opsional) — gula, natrium, dll. (mis. vitamin C effervescent)</label>
+                <div className="manual-form-grid">
+                  {LIMIT_ORDER.map((n) => {
+                    const meta = LIMIT_META[n];
                     return (
                       <div className="manual-form-field" key={n}>
                         <label>{meta.label} ({meta.unit})</label>
@@ -738,7 +881,7 @@ export default function Dashboard() {
             vitamins.map((v) => {
               const checked = !!(vitaminChecks[currentDate]?.[v.id]);
               const detailParts = [
-                ...NUTRIENT_ORDER.filter((n) => v[n]).map((n) => `${NUTRIENT_META[n].label} ${v[n]}${NUTRIENT_META[n].unit}`),
+                ...ALL_TRACKED_NUTRIENTS.filter((n) => v[n]).map((n) => `${ALL_TRACKED_META[n].label} ${v[n]}${ALL_TRACKED_META[n].unit}`),
                 ...Object.values(v.extra_nutrients || {}).filter((e) => e?.label).map((e) => `${e.label} ${e.value}${e.unit || ""}`),
               ];
               return (
@@ -755,7 +898,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Nutrisi tambahan (custom, di luar NUTRIENT_ORDER) dari vitamin yang dicentang hari ini */}
+        {/* Nutrisi tambahan (custom, di luar ALL_TRACKED_NUTRIENTS) dari vitamin yang dicentang + menu hari ini */}
         {currentDate && Object.keys(todaysExtraTotals).length > 0 && (
           <div className="panel full">
             <h3>
@@ -806,7 +949,10 @@ export default function Dashboard() {
               <div className="meal-list-empty">Belum ada menu tercatat untuk tanggal ini. Unggah CSV atau tambah manual di panel kiri.</div>
             ) : (
               todaysMeals.map((m) => {
-                const detailParts = NUTRIENT_ORDER.filter((n) => m[n]).map((n) => `${NUTRIENT_META[n].label} ${m[n]}${NUTRIENT_META[n].unit}`);
+                const detailParts = [
+                  ...ALL_TRACKED_NUTRIENTS.filter((n) => m[n]).map((n) => `${ALL_TRACKED_META[n].label} ${m[n]}${ALL_TRACKED_META[n].unit}`),
+                  ...Object.values(m.extra_nutrients || {}).filter((e) => e?.label).map((e) => `${e.label} ${e.value}${e.unit || ""}`),
+                ];
                 return (
                   <div className="meal-list-item" key={m.id}>
                     <div className="meal-list-info">
@@ -885,6 +1031,83 @@ export default function Dashboard() {
             <div className="legend">
               {activeNutrients.map((n) => (
                 <div className="legend-item" key={n}><span className="legend-dot" style={{ background: NUTRIENT_META[n].color }} />{NUTRIENT_META[n].label}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Batas harian (ceiling-type nutrients) — kept as its own section,
+            separate from the floor-type rings/nutrient-list/trend above (see
+            LIMIT_ORDER's comment in lib/nutrition.js for why). */}
+        {currentDate && activeLimitNutrients.length > 0 && (
+          <div className="panel full">
+            <h2>
+              {currentDate} — batas harian
+              <HelpTip label="Soal batas harian">
+                Gula, natrium, kolesterol, lemak jenuh, dan kafein punya BATAS MAKSIMUM harian, bukan
+                target minimum seperti nutrisi lain — jadi persentase di sini sebaiknya tetap RENDAH,
+                bukan dikejar sampai 100%. Angka batasnya panduan umum, bukan anjuran medis personal.
+              </HelpTip>
+            </h2>
+            {activeLimitNutrients.map((key) => {
+              const meta = LIMIT_META[key];
+              const value = limitTotals[key] || 0;
+              const limit = LIMITS[key];
+              const pct = limit ? (value / limit) * 100 : 0;
+              const status = limitStatusForPct(pct);
+              return (
+                <div className="nutrient-row" key={key}>
+                  <span className="nutrient-name">{meta.label}</span>
+                  <div className="nutrient-bar-track"><div className={`nutrient-bar-fill${pct > 100 ? " over" : ""}`} style={{ width: `${Math.min(pct, 100)}%`, background: status.color }} /></div>
+                  <span className="nutrient-value">{Math.round(value)}/{limit}{meta.unit} · {Math.round(pct)}% · {status.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Tren batas harian — structurally mirrors the "Tren dari hari ke
+            hari" trend above, computed from limitTrendData/LIMITS instead of
+            trendData/targets (see the geometry block near the top of this
+            component). Deliberately a parallel block, not a shared/generic
+            component with the floor-type trend. */}
+        {datesWithMeals.length > 1 && activeLimitNutrients.length > 0 && (
+          <div className="panel full">
+            <h3>
+              Tren batas harian
+              <HelpTip>
+                Setiap garis menunjukkan % dari BATAS harian — garis putus-putus di 100% berarti
+                "sudah di batas maksimum". Beda dari tren di atas, di sini sebaiknya garisnya tetap
+                di BAWAH garis putus-putus, bukan di atasnya.
+              </HelpTip>
+            </h3>
+            <div className="trend-svg-wrap">
+              <svg width={ltw} height={lth} viewBox={`0 0 ${ltw} ${lth}`}>
+                {lgridTicks.map((v) => (
+                  <g key={v}>
+                    <line x1={lpadL} x2={ltw - lpadR} y1={lyPos(v)} y2={lyPos(v)} stroke="rgba(243,237,233,0.08)" strokeWidth="1" />
+                    <text x={lpadL - 8} y={lyPos(v) + 4} textAnchor="end" fill="#a591a3" fontSize="10">{v}%</text>
+                  </g>
+                ))}
+                <line x1={lpadL} x2={ltw - lpadR} y1={lyPos(100)} y2={lyPos(100)} stroke="#F3EDE9" strokeWidth="1.2" strokeDasharray="4 4" opacity="0.4" />
+                {limitTrendData.map((d, i) => (
+                  <text key={d.date} x={lxPos(i)} y={lth - lpadB + 18} textAnchor="middle" fill="#a591a3" fontSize="10">{d.date}</text>
+                ))}
+                {activeLimitNutrients.map((n) => {
+                  const meta = LIMIT_META[n];
+                  const points = limitTrendData.map((d, i) => `${lxPos(i)},${lyPos(d[n])}`).join(" ");
+                  return (
+                    <g key={n}>
+                      <polyline points={points} fill="none" stroke={meta.color} strokeWidth="2" />
+                      {limitTrendData.map((d, i) => <circle key={i} cx={lxPos(i)} cy={lyPos(d[n])} r="3" fill={meta.color} />)}
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+            <div className="legend">
+              {activeLimitNutrients.map((n) => (
+                <div className="legend-item" key={n}><span className="legend-dot" style={{ background: LIMIT_META[n].color }} />{LIMIT_META[n].label}</div>
               ))}
             </div>
           </div>
