@@ -231,6 +231,32 @@ button, input { font-family: inherit; }
 .pregnancy-stat-label { font-size: 11px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .05em; }
 .pregnancy-progress-label { margin-top: 8px; font-size: 12px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; }
 
+/* ---------- Weight tracker (Profil) ---------- */
+/* Featured stat card -- mirrors .summary-card/.pregnancy-stat-value's big
+   Fraunces-serif-number treatment, just larger/boxed to read as THE number
+   on this panel (same spirit as the reference screenshot's big stat card,
+   in Bloom's own accent color instead of its literal light blue). */
+.weight-feature-card { background: rgba(224,169,74,0.14); border: 1px solid rgba(224,169,74,0.3); border-radius: 18px; padding: 22px 20px; text-align: center; margin-top: 6px; }
+.weight-feature-value { font-family: 'Fraunces', serif; font-size: 36px; font-weight: 500; color: var(--accent); line-height: 1.15; }
+.weight-feature-label { font-size: 12.5px; color: var(--text-dim); margin-top: 6px; font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .05em; }
+/* Pill-shaped, per the reference's "Tambahkan berat" button -- same accent
+   color/weight as .manual-form-save, just fully rounded. */
+.weight-add-btn { display: block; width: 100%; margin-top: 16px; padding: 13px; border-radius: 999px; border: none; background: var(--accent); color: #2B1B2E; font-weight: 600; font-size: 14px; cursor: pointer; text-align: center; }
+.weight-add-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.weight-add-btn:disabled { opacity: .6; cursor: default; }
+/* De-emphasized secondary control -- the date field stays hidden behind this
+   until the user actually needs to backfill a different day. */
+.weight-date-toggle { align-self: flex-start; background: none; border: none; color: var(--text-dimmer); font-size: 12px; cursor: pointer; padding: 2px 0; text-decoration: underline; }
+.weight-date-toggle:hover { color: var(--accent); }
+/* Static "Mulai — Ubah {delta} — Sekarang" range indicator. */
+.weight-range-bar { display: flex; align-items: center; gap: 10px; margin: 16px 0 4px; }
+.weight-range-end, .weight-range-mid { text-align: center; }
+.weight-range-mid { flex: 1; }
+.weight-range-end strong, .weight-range-mid strong { display: block; font-family: 'Fraunces', serif; font-size: 15px; font-weight: 500; }
+.weight-range-mid strong { color: var(--lilac); }
+.weight-range-end span, .weight-range-mid span { font-size: 10.5px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .04em; }
+.weight-range-line { flex: 1; height: 1px; background: rgba(243,237,233,0.15); }
+
 /* ---------- Vitamin checklist ---------- */
 .vitamin-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(243,237,233,0.06); }
 .vitamin-row:last-child { border-bottom: none; }
