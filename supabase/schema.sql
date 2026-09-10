@@ -345,3 +345,26 @@ from public.chat_sessions cs
 where cm.session_id is null
   and cs.user_id = cm.user_id
   and cs.title = 'Riwayat lama';
+
+-- 12) Riwayat fun fact makan siang (lihat app/api/cron/reminders/route.js,
+-- lib/gemini.js's generateMealFact). Slot makan siang (12:00 WIB) generate
+-- SATU fun fact per bucket trimester ('t1'/'t2'/'t3'/null = "belum
+-- diketahui") per run cron, dipakai bareng oleh semua subscriber di bucket
+-- itu -- bukan satu per user. Baris di sini dipakai supaya fact yang sama
+-- tidak berulang untuk bucket yang sama dalam 7 hari terakhir (lihat
+-- MEAL_FACT_HISTORY_WINDOW_DAYS di route.js). Bukan data milik user (tidak
+-- ada user_id) -- satu-satunya tabel di skema ini tanpa RLS policy per
+-- pemilik, cuma bisa diakses lewat service-role client (lib/supabaseAdmin.js).
+create table if not exists public.meal_fact_history (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null default 'lunch',
+  trimester text check (trimester in ('t1','t2','t3') or trimester is null), -- null = bucket "belum diketahui"
+  fact text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists meal_fact_history_bucket_created_idx on public.meal_fact_history (kind, trimester, created_at desc);
+
+alter table public.meal_fact_history enable row level security;
+-- Sengaja tanpa policy apa pun -- RLS aktif + nol policy berarti default-deny
+-- untuk role anon/authenticated; cuma service-role client (bypass RLS) yang
+-- pernah baca/tulis tabel ini.
