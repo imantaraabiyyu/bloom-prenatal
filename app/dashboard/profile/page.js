@@ -5,8 +5,11 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
 import HelpTip from "@/components/HelpTip";
-import { Home, NotebookText, MessageCircle, User, X, Star, AlertTriangle, Scale } from "lucide-react";
-import { todayISO } from "@/lib/nutrition";
+import { Home, NotebookText, MessageCircle, User, X, Star, AlertTriangle, Scale, Target } from "lucide-react";
+import {
+  todayISO, ALL_TRACKED_NUTRIENTS,
+  resolveEffectiveGoals, collectKnownExtraNutrientSlugs, slugifyNutrientLabel,
+} from "@/lib/nutrition";
 import {
   computeHPL, computeHPHTFromHPL, computeGestationalAge, formatGestationalAge, trimesterForDate,
   gestationalProgressPct, formatDateID, FULL_TERM_WEEKS,
@@ -30,6 +33,11 @@ const FILTERS = [
   { key: "girl", label: "Perempuan" },
   { key: "unisex", label: "Unisex" },
 ];
+
+// Sentinel value for the "Tambah nutrisi kustom" picker's freehand-entry
+// option -- never a real slug (slugifyNutrientLabel never produces
+// underscores-wrapped-in-double-underscore output), so it can't collide.
+const CUSTOM_FREE_TEXT = "__custom__";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -95,6 +103,27 @@ export default function ProfilePage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
+  // konfigurasi nutrisi (nutrient_goals) — target/batas per nutrisi, fixed
+  // (ALL_TRACKED_NUTRIENTS, di-seed otomatis lihat bootstrap effect) atau
+  // custom (dari extra_nutrients yang pernah dicatat, atau nama manual).
+  const [goalRows, setGoalRows] = useState([]);
+  const [knownExtraSlugs, setKnownExtraSlugs] = useState([]); // [{slug,label,unit}], seluruh riwayat
+  // Draft per nutrient_key -- lazily seeded from effectiveGoals the first
+  // time a row is touched (see goalDraftFor), same "own local edit buffer,
+  // synced from confirmed state until dirty" pattern as nameDraft/bioDraft.
+  const [goalDrafts, setGoalDrafts] = useState({});
+  const [goalSaving, setGoalSaving] = useState({});
+  const [goalErrors, setGoalErrors] = useState({});
+
+  // tambah nutrisi kustom
+  const [customPickSlug, setCustomPickSlug] = useState(CUSTOM_FREE_TEXT);
+  const [customLabel, setCustomLabel] = useState("");
+  const [customUnit, setCustomUnit] = useState("");
+  const [customGoalType, setCustomGoalType] = useState("max");
+  const [customTargetValue, setCustomTargetValue] = useState("");
+  const [customSaving, setCustomSaving] = useState(false);
+  const [customError, setCustomError] = useState("");
+
   useEffect(() => {
     if (!supabase) { router.replace("/login"); return; }
     (async () => {
@@ -130,6 +159,37 @@ export default function ProfilePage() {
         .eq("user_id", u.id)
         .order("date", { ascending: true });
       setWeightLogs(weightRows || []);
+
+      // nutrient_goals — seed every fixed nutrient with today's global
+      // default (direction + value, per this profile's own trimester) the
+      // first time this section is opened, so there's always a real, edited
+      // row to show/edit rather than an ephemeral computed fallback. Uses
+      // `profile.hpht` directly (not the `hpht` state, not yet updated this
+      // tick) so seeding reflects the profile actually just loaded above.
+      let { data: goalRowsData } = await supabase.from("nutrient_goals").select("*").eq("user_id", u.id);
+      const hasAnyFixedGoal = (goalRowsData || []).some((g) => ALL_TRACKED_NUTRIENTS.includes(g.nutrient_key));
+      if (!hasAnyFixedGoal) {
+        const seedTrimester = trimesterForDate(profile?.hpht || null, todayISO());
+        const seeded = resolveEffectiveGoals([], seedTrimester);
+        const seedRows = ALL_TRACKED_NUTRIENTS.map((key) => ({
+          user_id: u.id, nutrient_key: key, label: seeded[key].label, unit: seeded[key].unit,
+          goal_type: seeded[key].goalType, target_value: seeded[key].targetValue, is_custom: false,
+        }));
+        const { data: inserted } = await supabase.from("nutrient_goals").insert(seedRows).select();
+        goalRowsData = [...(goalRowsData || []), ...(inserted || [])];
+      }
+      setGoalRows(goalRowsData || []);
+
+      // Every custom extra_nutrients slug this user has ever logged (not
+      // just today's, unlike the Dashboard's own per-day extraTotals) —
+      // offered as add-candidates in "Tambah nutrisi kustom" below. Light
+      // projection (just the one jsonb column) since this can scan a
+      // user's whole history.
+      const [{ data: mealExtraRows }, { data: vitExtraRows }] = await Promise.all([
+        supabase.from("meals").select("extra_nutrients").eq("user_id", u.id),
+        supabase.from("vitamins").select("extra_nutrients").eq("user_id", u.id),
+      ]);
+      setKnownExtraSlugs(collectKnownExtraNutrientSlugs([...(mealExtraRows || []), ...(vitExtraRows || [])]));
 
       setLoading(false);
     })();
@@ -273,6 +333,88 @@ export default function ProfilePage() {
   // lib/weight.js) — never computed from a logged current weight.
   const bmi = useMemo(() => computeBMI(prePregWeightKg, heightCm), [prePregWeightKg, heightCm]);
   const bmiCat = bmiCategory(bmi);
+
+  // ---------------- konfigurasi nutrisi ----------------
+  const effectiveGoals = useMemo(() => resolveEffectiveGoals(goalRows, trimester), [goalRows, trimester]);
+  const customGoalRows = useMemo(() => goalRows.filter((g) => !ALL_TRACKED_NUTRIENTS.includes(g.nutrient_key)), [goalRows]);
+  const configuredCustomKeys = useMemo(() => new Set(customGoalRows.map((g) => g.nutrient_key)), [customGoalRows]);
+  // Known extras not yet configured -- these are the add-candidates offered
+  // in "Tambah nutrisi kustom"; a slug already configured is edited in the
+  // "Nutrisi kustom" list above instead, not re-offered here.
+  const unconfiguredKnownExtras = knownExtraSlugs.filter((e) => !configuredCustomKeys.has(e.slug));
+
+  // Lazily seeded from the row's current effective value the first time
+  // it's touched -- same "own local edit buffer until dirty" pattern as
+  // nameDraft/bioDraftWeight above, just keyed by nutrient_key since this is
+  // a multi-row section instead of one field.
+  function goalDraftFor(key) {
+    const current = effectiveGoals[key];
+    return goalDrafts[key] || { goalType: current.goalType, targetValue: String(current.targetValue) };
+  }
+  function setGoalDraftField(key, field, value) {
+    setGoalDrafts((prev) => ({ ...prev, [key]: { ...goalDraftFor(key), [field]: value } }));
+  }
+  function isGoalDirty(key) {
+    const draft = goalDraftFor(key);
+    const current = effectiveGoals[key];
+    return draft.goalType !== current.goalType || draft.targetValue !== String(current.targetValue);
+  }
+
+  // Shared by both fixed and custom rows -- label/unit/is_custom always
+  // come from the row's own current effectiveGoals entry (not editable
+  // inline), only direction + target value are ever drafted/saved here.
+  async function saveGoal(key) {
+    const draft = goalDraftFor(key);
+    const current = effectiveGoals[key];
+    setGoalErrors((prev) => ({ ...prev, [key]: "" }));
+    const value = parseFloat(draft.targetValue);
+    if (!draft.targetValue.trim() || isNaN(value) || value <= 0) {
+      setGoalErrors((prev) => ({ ...prev, [key]: "Masukkan angka target yang valid." }));
+      return;
+    }
+    setGoalSaving((prev) => ({ ...prev, [key]: true }));
+    const { data, error } = await supabase.from("nutrient_goals").upsert(
+      {
+        user_id: user.id, nutrient_key: key, label: current.label, unit: current.unit,
+        goal_type: draft.goalType, target_value: value, is_custom: current.isCustom,
+      },
+      { onConflict: "user_id,nutrient_key" }
+    ).select().maybeSingle();
+    setGoalSaving((prev) => ({ ...prev, [key]: false }));
+    if (error) { setGoalErrors((prev) => ({ ...prev, [key]: error.message })); return; }
+    setGoalRows((prev) => [...prev.filter((g) => g.nutrient_key !== key), data]);
+    setGoalDrafts((prev) => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
+  async function handleDeleteCustomGoal(key, id) {
+    setGoalRows((prev) => prev.filter((g) => g.id !== id));
+    setGoalDrafts((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    await supabase.from("nutrient_goals").delete().eq("id", id);
+  }
+
+  async function handleAddCustomGoal() {
+    setCustomError("");
+    const picked = customPickSlug !== CUSTOM_FREE_TEXT ? knownExtraSlugs.find((e) => e.slug === customPickSlug) : null;
+    const label = (picked ? picked.label : customLabel).trim();
+    const unit = (picked ? picked.unit : customUnit).trim();
+    const nutrientKey = picked ? picked.slug : slugifyNutrientLabel(label);
+    if (!label) { setCustomError("Isi dulu nama nutrisinya, atau pilih dari daftar."); return; }
+    if (!nutrientKey) { setCustomError("Nama nutrisi tidak valid — coba nama lain."); return; }
+    const value = parseFloat(customTargetValue);
+    if (!customTargetValue.trim() || isNaN(value) || value <= 0) { setCustomError("Masukkan angka target/batas yang valid."); return; }
+    setCustomSaving(true);
+    const { data, error } = await supabase.from("nutrient_goals").insert({
+      user_id: user.id, nutrient_key: nutrientKey, label, unit, goal_type: customGoalType, target_value: value, is_custom: true,
+    }).select().maybeSingle();
+    setCustomSaving(false);
+    if (error) {
+      setCustomError(error.code === "23505" ? "Nutrisi ini sudah dikonfigurasi — edit langsung di daftar di atas." : error.message);
+      return;
+    }
+    setGoalRows((prev) => [...prev, data]);
+    setCustomPickSlug(CUSTOM_FREE_TEXT);
+    setCustomLabel(""); setCustomUnit(""); setCustomTargetValue(""); setCustomGoalType("max");
+  }
 
   // ---------------- berat badan (weight_logs) ----------------
   // weightLogs is always kept sorted ascending by date (fetched that way,
@@ -811,6 +953,167 @@ export default function ProfilePage() {
               </svg>
             </div>
           )}
+        </div>
+
+        {/* Konfigurasi nutrisi — target/batas per nutrisi, termasuk custom
+            dari extra_nutrients yang pernah dicatat (mis. Laktosa dari label
+            kemasan). Baris fixed di-seed otomatis begitu bagian ini pertama
+            kali dibuka (lihat bootstrap effect); baris custom ditambahkan
+            manual di bawah. Dipakai langsung oleh Dashboard, peringatan
+            batas harian, dan chat gizi Bloom (lihat lib/nutrition.js's
+            resolveEffectiveGoals). */}
+        <div className="panel full">
+          <h2>
+            <Target size={18} /> Konfigurasi nutrisi
+            <HelpTip label="Soal target & batas nutrisi">
+              Tiap nutrisi bisa kamu atur sendiri arahnya: &quot;capai minimal&quot; (mis. protein)
+              atau &quot;jangan sampai lewat batas&quot; (mis. gula) — termasuk nutrisi kustom yang
+              pernah tercatat dari foto label makanan/vitamin. Perubahan di sini langsung dipakai di
+              Dashboard, peringatan batas harian, dan analisis chat gizi Bloom.
+            </HelpTip>
+          </h2>
+
+          <h3 style={{ marginTop: 0 }}>Nutrisi tetap</h3>
+          <div className="goal-list">
+            {ALL_TRACKED_NUTRIENTS.map((key) => {
+              const draft = goalDraftFor(key);
+              const current = effectiveGoals[key];
+              const dirty = isGoalDirty(key);
+              return (
+                <div className="goal-row" key={key}>
+                  <span className="goal-row-name">{current.label}</span>
+                  <div className="goal-row-controls">
+                    <div className="goal-direction-toggle">
+                      <button
+                        type="button" className={`goal-direction-btn ${draft.goalType === "min" ? "active" : ""}`}
+                        onClick={() => setGoalDraftField(key, "goalType", "min")}
+                      >
+                        Capai minimal
+                      </button>
+                      <button
+                        type="button" className={`goal-direction-btn ${draft.goalType === "max" ? "active" : ""}`}
+                        onClick={() => setGoalDraftField(key, "goalType", "max")}
+                      >
+                        Jangan lewat batas
+                      </button>
+                    </div>
+                    <input
+                      type="number" inputMode="decimal" min="0" step="any" className="goal-value-input"
+                      value={draft.targetValue} onChange={(e) => setGoalDraftField(key, "targetValue", e.target.value)}
+                    />
+                    <span className="goal-unit">{current.unit}</span>
+                    {dirty && (
+                      <button className="manual-form-save goal-save-btn" onClick={() => saveGoal(key)} disabled={goalSaving[key]}>
+                        {goalSaving[key] ? "…" : "Simpan"}
+                      </button>
+                    )}
+                  </div>
+                  {goalErrors[key] && <div className="error-box"><AlertTriangle size={13} /> {goalErrors[key]}</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="divider" />
+
+          <h3>Nutrisi kustom</h3>
+          {customGoalRows.length === 0 ? (
+            <p className="format-hint" style={{ marginTop: 0 }}>
+              Belum ada nutrisi kustom yang diatur. Tambahkan dari nutrisi yang pernah kamu catat,
+              atau isi manual di bawah.
+            </p>
+          ) : (
+            <div className="goal-list">
+              {customGoalRows.map((row) => {
+                const key = row.nutrient_key;
+                const draft = goalDraftFor(key);
+                const current = effectiveGoals[key];
+                const dirty = isGoalDirty(key);
+                return (
+                  <div className="goal-row" key={key}>
+                    <span className="goal-row-name">{current.label}</span>
+                    <div className="goal-row-controls">
+                      <div className="goal-direction-toggle">
+                        <button
+                          type="button" className={`goal-direction-btn ${draft.goalType === "min" ? "active" : ""}`}
+                          onClick={() => setGoalDraftField(key, "goalType", "min")}
+                        >
+                          Capai minimal
+                        </button>
+                        <button
+                          type="button" className={`goal-direction-btn ${draft.goalType === "max" ? "active" : ""}`}
+                          onClick={() => setGoalDraftField(key, "goalType", "max")}
+                        >
+                          Jangan lewat batas
+                        </button>
+                      </div>
+                      <input
+                        type="number" inputMode="decimal" min="0" step="any" className="goal-value-input"
+                        value={draft.targetValue} onChange={(e) => setGoalDraftField(key, "targetValue", e.target.value)}
+                      />
+                      <span className="goal-unit">{current.unit}</span>
+                      {dirty && (
+                        <button className="manual-form-save goal-save-btn" onClick={() => saveGoal(key)} disabled={goalSaving[key]}>
+                          {goalSaving[key] ? "…" : "Simpan"}
+                        </button>
+                      )}
+                      <ConfirmButton className="goal-remove" title="Hapus nutrisi kustom ini" onConfirm={() => handleDeleteCustomGoal(key, row.id)}>
+                        <X size={14} />
+                      </ConfirmButton>
+                    </div>
+                    {goalErrors[key] && <div className="error-box"><AlertTriangle size={13} /> {goalErrors[key]}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <h3>Tambah nutrisi kustom</h3>
+          <div className="manual-form">
+            <div className="manual-form-row">
+              <select
+                className="babyname-gender-select" value={customPickSlug}
+                onChange={(e) => setCustomPickSlug(e.target.value)}
+              >
+                <option value={CUSTOM_FREE_TEXT}>Nama manual…</option>
+                {unconfiguredKnownExtras.map((e) => (
+                  <option key={e.slug} value={e.slug}>{e.label} ({e.unit || "tanpa satuan"})</option>
+                ))}
+              </select>
+            </div>
+            {customPickSlug === CUSTOM_FREE_TEXT && (
+              <div className="manual-form-row">
+                <input
+                  type="text" placeholder="Nama nutrisi (mis. Laktosa)"
+                  value={customLabel} onChange={(e) => setCustomLabel(e.target.value)}
+                />
+                <input
+                  type="text" placeholder="Satuan (mis. g)"
+                  value={customUnit} onChange={(e) => setCustomUnit(e.target.value)}
+                />
+              </div>
+            )}
+            <div className="manual-form-row">
+              <div className="goal-direction-toggle">
+                <button type="button" className={`goal-direction-btn ${customGoalType === "min" ? "active" : ""}`} onClick={() => setCustomGoalType("min")}>
+                  Capai minimal
+                </button>
+                <button type="button" className={`goal-direction-btn ${customGoalType === "max" ? "active" : ""}`} onClick={() => setCustomGoalType("max")}>
+                  Jangan lewat batas
+                </button>
+              </div>
+              <input
+                type="number" inputMode="decimal" min="0" step="any" placeholder="Target/batas"
+                value={customTargetValue} onChange={(e) => setCustomTargetValue(e.target.value)}
+              />
+            </div>
+            {customError && <div className="error-box"><AlertTriangle size={13} /> {customError}</div>}
+            <div className="manual-form-actions">
+              <button className="manual-form-save" onClick={handleAddCustomGoal} disabled={customSaving}>
+                {customSaving ? "Menyimpan…" : "Tambah nutrisi kustom"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Calon nama bayi */}
