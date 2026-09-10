@@ -469,6 +469,56 @@ button, input { font-family: inherit; }
 .attach-menu-item:hover { background: rgba(243,237,233,0.08); color: var(--text); }
 .attach-menu-item input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
+/* ---------- Chat session history (app/dashboard/chat/page.js) ----------
+   Default (>=820px, matches .bloom-grid's own sidebar breakpoint above):
+   a normal static sidebar occupying .bloom-grid's 340px left column --
+   .chat-thread-panel (no more `full`) falls into the right column next to
+   it. Below 820px there's no room for a persistent sidebar, so the same
+   panel becomes a fixed slide-in drawer (see the <820px override below)
+   toggled by .chat-session-toggle, closed by tapping its backdrop. */
+.chat-session-panel { display: flex; flex-direction: column; gap: 14px; }
+.chat-session-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-new-session-btn { display: flex; align-items: center; gap: 6px; flex-shrink: 0; background: var(--accent); color: #2B1B2E; border: none; border-radius: 8px; padding: 7px 11px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.chat-new-session-btn:hover { filter: brightness(1.05); }
+.chat-session-list { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }
+.chat-session-item { display: flex; align-items: center; gap: 8px; padding: 11px 6px; border-bottom: 1px solid rgba(243,237,233,0.06); border-radius: 8px; cursor: pointer; }
+.chat-session-item:last-child { border-bottom: none; }
+.chat-session-item:hover { background: rgba(243,237,233,0.04); }
+.chat-session-item.active { background: rgba(224,169,74,0.12); }
+.chat-session-info { flex: 1; min-width: 0; }
+.chat-session-title { font-size: 13px; font-weight: 600; color: #e8dde5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-session-meta { font-size: 10.5px; color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
+.chat-session-remove { background: none; border: none; color: var(--text-faint); cursor: pointer; padding: 4px 6px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; }
+.chat-session-remove:hover { color: var(--rose); background: rgba(199,123,99,0.12); }
+/* Toggle button lives inside .chat-toolbar (justify-content: flex-end) --
+   margin-right:auto pins it to the left while the clear-history buttons
+   stay right, same row, no extra wrapper needed. Hidden entirely >=820px
+   (see below) since the sidebar is always visible there already. */
+.chat-session-toggle { display: flex; align-items: center; gap: 6px; margin-right: auto; background: none; border: 1px solid var(--panel-border); color: var(--text-dim); border-radius: 8px; padding: 6px 10px; font-size: 11.5px; cursor: pointer; }
+.chat-session-toggle:hover { color: var(--text); border-color: var(--accent); }
+.chat-session-backdrop { display: none; }
+
+@media (max-width: 819px) {
+  .chat-session-panel {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
+    width: min(300px, 85vw); margin: 0; border-radius: 0; border: none;
+    box-shadow: 0 0 32px rgba(0,0,0,0.5); background: var(--bg2);
+    transform: translateX(-100%); transition: transform .22s ease;
+    overflow-y: auto;
+  }
+  .chat-session-panel.open { transform: translateX(0); }
+  .chat-session-list { max-height: none; flex: 1; }
+  .chat-session-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none;
+    transition: opacity .22s ease;
+  }
+  .chat-session-backdrop.open { opacity: 1; pointer-events: auto; }
+}
+@media (min-width: 820px) {
+  .chat-session-toggle { display: none; }
+}
+
 /* ---------- HelpTip ("?" -> reveal a hint on click, components/HelpTip.js) ---------- */
 .help-tip { position: relative; display: inline-block; margin-left: 6px; vertical-align: middle; }
 .help-tip-trigger {
@@ -578,10 +628,16 @@ button, input { font-family: inherit; }
      where the thread should fill the screen and the input should always be
      reachable without hunting for it. Scoped to .chat-page (this page's
      .wrap only) so nothing else's mobile layout changes.
-     min-height set twice on purpose: dvh accounts for mobile browser
-     chrome (address bar) showing/hiding, vh is the fallback for browsers
-     that don't support dvh — the later, understood declaration wins. */
-  .chat-page { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+     height (not min-height!) is what actually caps this to the viewport —
+     a min-height is only a floor, so once the thread grows past it the
+     whole page used to just keep growing past the viewport instead of the
+     flex:1;min-height:0 chain below ever height-constraining and letting
+     .chat-thread's overflow-y:auto take over, which is what made the thread
+     unscrollable on mobile (the page scrolled instead, burying the input).
+     Set twice on purpose: dvh accounts for mobile browser chrome (address
+     bar) showing/hiding, vh is the fallback for browsers that don't support
+     dvh — the later, understood declaration wins. */
+  .chat-page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
   .chat-page .bloom-header { margin: 14px auto 10px; }
   .chat-page .bloom-sub { display: none; } /* the one paragraph of intro copy — not needed every time you open the tab */
   /* .bloom-grid is a CSS Grid everywhere else; overridden to a flex column
@@ -609,7 +665,8 @@ button, input { font-family: inherit; }
      thumbnails (.pending-remove-btn / .entry-attachment-remove) -- a
      different, smaller-by-design badge convention. */
   .vitamin-remove, .meal-list-remove, .babyname-remove,
-  .journal-entry-edit, .journal-entry-remove, .extra-nutrient-row button {
+  .journal-entry-edit, .journal-entry-remove, .extra-nutrient-row button,
+  .chat-session-remove {
     padding: 10px;
   }
   .mini-calendar-header button { width: 36px; height: 36px; }

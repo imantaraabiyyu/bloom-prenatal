@@ -100,6 +100,19 @@ WhatsApp, akun Meta, atau setup tambahan apa pun selain langkah di bawah.
    # sama, baru kalau semua key juga gagal di model itu, pindah ke model
    # cadangan berikutnya (dan mulai lagi dari key pertama).
 
+   # (Opsional) API key TERPISAH khusus tier "chat" -- kalau diisi, tab Chat +
+   # transkrip Jurnal pakai key/kuota ini sendiri, sama sekali tidak berbagi
+   # dengan GEMINI_API_KEY di atas (yang tetap dipakai notifikasi cron/tier
+   # "low" apa pun yang terjadi). Kosongkan/hapus untuk kembali ke perilaku
+   # default: semua fitur berbagi satu GEMINI_API_KEY yang sama, seperti di
+   # atas -- jadi ini aman ditambahkan belakangan, tidak wajib diisi sekarang.
+   # Kalau tier "chat" gagal total dan jatuh ke tier "low" sebagai jalan
+   # terakhir (lihat catatan di atas), key yang dipakai pun ikut pindah ke
+   # GEMINI_API_KEY, bukan tetap pakai key khusus chat ini.
+   GEMINI_CHAT_API_KEY=                      # opsional -- API key gratis lain dari link langkah 1
+   GEMINI_CHAT_API_KEY_FALLBACKS=            # opsional, daftar cadangan khusus tier "chat", format
+                                             # sama seperti GEMINI_API_KEY_FALLBACKS
+
    # Google kadang mem-pensiunkan model lama — ganti nilai di atas kalau suatu
    # saat muncul error "model ... no longer available".
    ```
