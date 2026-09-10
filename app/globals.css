@@ -578,10 +578,16 @@ button, input { font-family: inherit; }
      where the thread should fill the screen and the input should always be
      reachable without hunting for it. Scoped to .chat-page (this page's
      .wrap only) so nothing else's mobile layout changes.
-     min-height set twice on purpose: dvh accounts for mobile browser
-     chrome (address bar) showing/hiding, vh is the fallback for browsers
-     that don't support dvh — the later, understood declaration wins. */
-  .chat-page { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+     height (not min-height!) is what actually caps this to the viewport —
+     a min-height is only a floor, so once the thread grows past it the
+     whole page used to just keep growing past the viewport instead of the
+     flex:1;min-height:0 chain below ever height-constraining and letting
+     .chat-thread's overflow-y:auto take over, which is what made the thread
+     unscrollable on mobile (the page scrolled instead, burying the input).
+     Set twice on purpose: dvh accounts for mobile browser chrome (address
+     bar) showing/hiding, vh is the fallback for browsers that don't support
+     dvh — the later, understood declaration wins. */
+  .chat-page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
   .chat-page .bloom-header { margin: 14px auto 10px; }
   .chat-page .bloom-sub { display: none; } /* the one paragraph of intro copy — not needed every time you open the tab */
   /* .bloom-grid is a CSS Grid everywhere else; overridden to a flex column
