@@ -17,6 +17,12 @@ import { computeGestationalAge, trimesterForWeeks, addDays } from "@/lib/pregnan
 // the week they happen to log on.
 const WEIGHT_NUDGE_WINDOW_DAYS = 6;
 
+// Same 7-day-inclusive-of-today window, for the lunch slot's shared fun
+// fact: a bucket's own meal_fact_history isn't allowed to repeat within
+// this many days back (see lib/gemini.js's generateMealFact avoid-list and
+// supabase/schema.sql's meal_fact_history).
+const MEAL_FACT_HISTORY_WINDOW_DAYS = 6;
+
 // The one scheduled sender behind all 4 daily slots (see vercel.json):
 //   07:00 WIB morning (unconditional), 12:00 WIB lunch (unconditional),
 //   19:00 WIB dinner (only if meal and/or vitamin isn't logged yet today),
@@ -132,6 +138,62 @@ export async function GET(request) {
     weighedUserIds = distinctUserIds(weightRows);
   }
 
+  // Only the lunch slot's fun fact is shared: ONE Gemini call per distinct
+  // trimester bucket present among today's subscribers ("t1"/"t2"/"t3"/
+  // "unknown" for no profiles.hpht set), not once per user -- see
+  // lib/gemini.js's generateMealFact and supabase/schema.sql's
+  // meal_fact_history. bucketKeyForUser mirrors the same
+  // computeGestationalAge -> trimesterForWeeks pipeline the per-user loop
+  // below still uses for morning/dinner/night's own (untouched, per-user)
+  // nudge -- computed twice rather than threaded through as a precomputed
+  // map, since both are cheap/pure/no-I/O and this keeps that loop's
+  // existing per-kind logic otherwise unchanged.
+  function bucketKeyForUser(userId) {
+    const profile = profileByUser.get(userId);
+    const ga = profile?.hpht ? computeGestationalAge(profile.hpht, today) : null;
+    const trimester = ga ? trimesterForWeeks(ga.weeks) : null;
+    return trimester || "unknown";
+  }
+
+  const mealFactByBucket = new Map();
+  if (kind === "lunch") {
+    const distinctBuckets = [...new Set(userIds.map(bucketKeyForUser))];
+    await Promise.all(distinctBuckets.map(async (bucketKey) => {
+      const trimester = bucketKey === "unknown" ? null : bucketKey;
+      const historyQuery = supabase
+        .from("meal_fact_history")
+        .select("fact")
+        .eq("kind", "lunch")
+        .gte("created_at", addDays(today, -MEAL_FACT_HISTORY_WINDOW_DAYS));
+      // Schema not applied yet (see the improver plan's manual-deploy note)
+      // -> this errors, `recentRows` stays undefined, avoidFacts degrades to
+      // [] below -- best-effort, never blocks the send, same philosophy as
+      // the dinner slot's limit-totals reads above.
+      const { data: recentRows } = trimester
+        ? await historyQuery.eq("trimester", trimester)
+        : await historyQuery.is("trimester", null);
+      const avoidFacts = (recentRows || []).map((r) => r.fact);
+
+      let fact;
+      try {
+        fact = await generateMealFact({ trimester, avoidFacts });
+        // Best-effort dedup only (per the approved plan): Gemini ignoring
+        // the avoid-list isn't retried, just logged for visibility.
+        if (avoidFacts.includes(fact)) {
+          console.warn(`cron/reminders lunch fun fact repeated recent history for bucket=${bucketKey}: "${fact}"`);
+        }
+        await supabase.from("meal_fact_history").insert({ kind: "lunch", trimester, fact });
+      } catch {
+        // Per-bucket, per-run seed (not per-user) -- an outage still shows
+        // the same fallback line to everyone sharing this bucket today.
+        // Not written to meal_fact_history: it's static-bank text Gemini
+        // never actually said, and would pollute future avoid-lists.
+        fact = pickMealFactFallback(`${today}:${bucketKey}`);
+      }
+      mealFactByBucket.set(bucketKey, fact);
+    }));
+  }
+
   // Every user is independent (own Gemini call, own subscriptions to push
   // to), so they're processed concurrently rather than summed one-by-one --
   // total wall-clock becomes roughly "slowest single user" instead of "every
@@ -166,11 +228,8 @@ export async function GET(request) {
       body = kind === "morning"
         ? buildMorningBody({ name, nudge, weightNudge: weighedUserIds.has(userId) ? "" : WEIGHT_NUDGE_TEXT })
         : buildNightBody({ name, nudge });
-    } else { // lunch
-      let mealFact;
-      try { mealFact = await generateMealFact({ trimester, weeks }); }
-      catch { mealFact = pickMealFactFallback(`${userId}:${today}:lunch`); }
-      body = buildLunchBody({ name, mealFact });
+    } else { // lunch -- shared per trimester bucket, see mealFactByBucket above
+      body = buildLunchBody({ name, mealFact: mealFactByBucket.get(trimester || "unknown") });
     }
 
     const payload = { title: TITLES[kind], body, url: "/dashboard" };
