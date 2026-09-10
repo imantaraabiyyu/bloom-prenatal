@@ -296,3 +296,52 @@ create policy "weight_logs: owner select" on public.weight_logs for select using
 create policy "weight_logs: owner insert" on public.weight_logs for insert with check (auth.uid() = user_id);
 create policy "weight_logs: owner update" on public.weight_logs for update using (auth.uid() = user_id);
 create policy "weight_logs: owner delete" on public.weight_logs for delete using (auth.uid() = user_id);
+
+-- 11) Sesi riwayat chat (mengelompokkan chat_messages per sesi obrolan, lihat
+-- app/dashboard/chat/page.js). Satu user bisa punya banyak sesi — "Chat baru"
+-- memulai sesi kosong, daftar sesi lama bisa dibuka lagi lewat sidebar
+-- (desktop) / drawer (mobile). `title` null berarti sesi itu belum punya
+-- pesan pertama untuk dijadikan judul (diisi otomatis begitu pesan pertama
+-- tersimpan). `updated_at` di-bump sekali per giliran obrolan supaya sesi
+-- yang paling baru dipakai muncul di atas daftar.
+create table if not exists public.chat_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  title text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists chat_sessions_user_updated_idx on public.chat_sessions (user_id, updated_at desc);
+
+alter table public.chat_sessions enable row level security;
+
+create policy "chat_sessions: owner select" on public.chat_sessions for select using (auth.uid() = user_id);
+create policy "chat_sessions: owner insert" on public.chat_sessions for insert with check (auth.uid() = user_id);
+create policy "chat_sessions: owner update" on public.chat_sessions for update using (auth.uid() = user_id);
+create policy "chat_sessions: owner delete" on public.chat_sessions for delete using (auth.uid() = user_id);
+
+-- chat_messages gains a (nullable) link to the session it belongs to —
+-- `on delete cascade` means deleting a chat_sessions row deletes its
+-- messages in the same statement, no separate cleanup query needed.
+alter table public.chat_messages add column if not exists session_id uuid references public.chat_sessions(id) on delete cascade;
+create index if not exists chat_messages_session_created_idx on public.chat_messages (session_id, created_at);
+
+-- One-time backfill: every user's pre-existing chat_messages (from before
+-- sessions existed) get grouped into a single "Riwayat lama" session each,
+-- so nothing is lost when this feature ships. Idempotent/no-op once every
+-- message has a session_id (the `where session_id is null` guards on both
+-- statements mean re-running this file after the first successful run does
+-- nothing further here) — same additive style as every other statement in
+-- this file.
+insert into public.chat_sessions (user_id, title, created_at, updated_at)
+select user_id, 'Riwayat lama', min(created_at), max(created_at)
+from public.chat_messages
+where session_id is null
+group by user_id;
+
+update public.chat_messages cm
+set session_id = cs.id
+from public.chat_sessions cs
+where cm.session_id is null
+  and cs.user_id = cm.user_id
+  and cs.title = 'Riwayat lama';

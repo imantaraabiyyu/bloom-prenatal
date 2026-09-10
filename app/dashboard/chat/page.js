@@ -10,7 +10,7 @@ import {
 } from "@/lib/nutrition";
 import {
   Home, NotebookText, MessageCircle, User, X, Check, Paperclip,
-  Camera, Images, AlertTriangle,
+  Camera, Images, AlertTriangle, History, Plus,
   Image as ImageIcon, // aliased -- this file's resizeImageForChat uses the
                        // real global `new Image()`, which a same-named
                        // import would shadow and silently break
@@ -107,6 +107,9 @@ export default function ChatPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState([]);
+  const [sessions, setSessions] = useState([]); // chat_sessions rows, newest-updated first
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false); // mobile/tablet-only slide-in (<820px)
   const [input, setInput] = useState("");
   const [pendingImage, setPendingImage] = useState(null); // { file, url }
   const [sending, setSending] = useState(false);
@@ -114,6 +117,30 @@ export default function ChatPage() {
   const [attachMenuOpen, setAttachMenuOpen] = useState(false); // tap-to-toggle on mobile; CSS :hover also reveals it on desktop
   const threadEndRef = useRef(null);
   const attachMenuRef = useRef(null);
+
+  // One raw chat_messages row -> the shape local state uses — shared by the
+  // initial session load and every subsequent session switch.
+  function rowToMessage(r) {
+    return {
+      id: r.id, role: r.role, text: r.text, hadImage: r.had_image,
+      analysis: r.analysis, savedMealId: r.saved_meal_id,
+    };
+  }
+
+  // Replaces `messages` with one session's history. Gemini's own
+  // conversation context (the `history` built in handleSend below) is
+  // derived straight from `messages`, so swapping it here is also what
+  // scopes Gemini's memory of prior turns to the session you're actually
+  // looking at — switching sessions gives Gemini a clean slate, not a mix
+  // of every conversation you've ever had.
+  async function loadMessagesForSession(sessionId) {
+    const { data: rows } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true });
+    setMessages((rows || []).map(rowToMessage));
+  }
 
   useEffect(() => {
     if (!supabase) { router.replace("/login"); return; }
@@ -123,18 +150,27 @@ export default function ChatPage() {
       const u = sessionData.session.user;
       setUser(u);
 
-      // Chat history — photos themselves are never stored (see disclaimer
-      // below), so a reloaded user message with had_image just shows a
-      // placeholder instead of the actual photo.
-      const { data: rows } = await supabase
-        .from("chat_messages")
+      // Session list, newest-active-first (chat_sessions.updated_at — see
+      // touchSession below). A brand-new user (or one whose only sessions
+      // were all deleted) gets one fresh empty session created on the spot
+      // so there's always somewhere to chat into.
+      let { data: sessionRows } = await supabase
+        .from("chat_sessions")
         .select("*")
         .eq("user_id", u.id)
-        .order("created_at", { ascending: true });
-      setMessages((rows || []).map((r) => ({
-        id: r.id, role: r.role, text: r.text, hadImage: r.had_image,
-        analysis: r.analysis, savedMealId: r.saved_meal_id,
-      })));
+        .order("updated_at", { ascending: false });
+      if (!sessionRows || sessionRows.length === 0) {
+        const { data: created } = await supabase
+          .from("chat_sessions").insert({ user_id: u.id }).select().maybeSingle();
+        sessionRows = created ? [created] : [];
+      }
+      setSessions(sessionRows);
+      const active = sessionRows[0] || null;
+      setActiveSessionId(active?.id || null);
+      // Photos themselves are never stored (see disclaimer below), so a
+      // reloaded user message with had_image just shows a placeholder
+      // instead of the actual photo.
+      if (active) await loadMessagesForSession(active.id);
       setLoading(false);
     })();
   }, [supabase, router]);
@@ -193,7 +229,7 @@ export default function ChatPage() {
   async function saveMessage(fields, extraLocal = {}) {
     const { data, error } = await supabase
       .from("chat_messages")
-      .insert({ user_id: user.id, ...fields })
+      .insert({ user_id: user.id, session_id: activeSessionId, ...fields })
       .select()
       .maybeSingle();
     if (error || !data) {
@@ -207,19 +243,40 @@ export default function ChatPage() {
     return data;
   }
 
+  // Sets a still-untitled session's title from its first message (plain
+  // truncation — no extra Gemini call just to name a chat), and always
+  // bumps updated_at so the session you're actually talking in sorts first
+  // in the list. Called once per turn (right after the user message saves),
+  // not once per saveMessage call, to keep this to one extra write per turn.
+  async function touchSession(sessionId, { text, hadImage }) {
+    const current = sessions.find((s) => s.id === sessionId);
+    const updates = { updated_at: new Date().toISOString() };
+    if (current && !current.title) {
+      updates.title = text ? text.slice(0, 60) : (hadImage ? "Chat dari foto" : "Chat baru");
+    }
+    const { data } = await supabase.from("chat_sessions").update(updates).eq("id", sessionId).select().maybeSingle();
+    if (!data) return;
+    setSessions((prev) => prev
+      .map((s) => (s.id === sessionId ? data : s))
+      .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)));
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text && !pendingImage) return;
 
     // Context for Gemini is everything BEFORE this turn — captured now,
     // since the messages state updates from saveMessage() below won't be
-    // reflected in this closure's `messages` until the next render.
+    // reflected in this closure's `messages` until the next render. Scoped
+    // to the active session only (see loadMessagesForSession above), so
+    // Gemini's memory of prior turns never bleeds across sessions.
     const history = messages.map(toHistoryEntry).filter(Boolean).slice(-12);
 
     const imageUrl = pendingImage?.url;
     const file = pendingImage?.file;
     const hadImage = !!pendingImage;
-    await saveMessage({ role: "user", text: text || null, had_image: hadImage }, hadImage ? { imageUrl } : {});
+    const savedUserMsg = await saveMessage({ role: "user", text: text || null, had_image: hadImage }, hadImage ? { imageUrl } : {});
+    if (savedUserMsg) touchSession(activeSessionId, { text, hadImage });
     setInput("");
     setPendingImage(null);
     setSending(true);
@@ -375,9 +432,60 @@ export default function ChatPage() {
     if (updatedAnalysis) await supabase.from("chat_messages").update({ analysis: updatedAnalysis }).eq("id", msgId);
   }
 
-  async function clearHistory() {
+  // Starts a fresh, empty session and switches to it — this is the "New
+  // chat" action; the session you were just in stays in the list untouched.
+  async function startNewSession() {
+    const { data: created } = await supabase.from("chat_sessions").insert({ user_id: user.id }).select().maybeSingle();
+    if (!created) return;
+    setSessions((prev) => [created, ...prev]);
+    setActiveSessionId(created.id);
     setMessages([]);
-    await supabase.from("chat_messages").delete().eq("user_id", user.id);
+    setSessionDrawerOpen(false);
+  }
+
+  async function switchSession(sessionId) {
+    if (sessionId !== activeSessionId) {
+      setActiveSessionId(sessionId);
+      await loadMessagesForSession(sessionId);
+    }
+    setSessionDrawerOpen(false);
+  }
+
+  // Deletes one session — its messages cascade-delete with it (see the
+  // session_id FK's `on delete cascade` in supabase/schema.sql), no separate
+  // chat_messages cleanup needed. Keeps the page usable afterward: switches
+  // to whatever's now most recent, or spins up a fresh empty session if that
+  // was the user's last one, so there's never a moment with zero sessions.
+  async function deleteSession(sessionId) {
+    await supabase.from("chat_sessions").delete().eq("id", sessionId);
+    const remaining = sessions.filter((s) => s.id !== sessionId);
+    if (remaining.length === 0) {
+      const { data: created } = await supabase.from("chat_sessions").insert({ user_id: user.id }).select().maybeSingle();
+      setSessions(created ? [created] : []);
+      setActiveSessionId(created?.id || null);
+      setMessages([]);
+      return;
+    }
+    setSessions(remaining);
+    if (sessionId === activeSessionId) {
+      setActiveSessionId(remaining[0].id);
+      await loadMessagesForSession(remaining[0].id);
+    }
+  }
+
+  // "Hapus semua riwayat" — wipes every session (and, via cascade, every
+  // message) for this user, distinct from "Hapus riwayat chat" below which
+  // only clears the one session currently open.
+  async function deleteAllHistory() {
+    await supabase.from("chat_sessions").delete().eq("user_id", user.id);
+    const { data: created } = await supabase.from("chat_sessions").insert({ user_id: user.id }).select().maybeSingle();
+    setSessions(created ? [created] : []);
+    setActiveSessionId(created?.id || null);
+    setMessages([]);
+  }
+
+  function formatSessionMeta(s) {
+    return new Date(s.updated_at).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
   if (loading) return <div className="center-loading">Memuat data…</div>;
@@ -409,18 +517,66 @@ export default function ChatPage() {
       </div>
 
       <div className="bloom-grid">
+        {/* Backdrop only visually/interactively exists below the 820px
+            bloom-grid breakpoint (app/globals.css) -- above it the session
+            panel is a normal static sidebar column, not a drawer. */}
         <div
-          className={`panel full ${dragActive ? "chat-drag-active" : ""}`}
+          className={`chat-session-backdrop ${sessionDrawerOpen ? "open" : ""}`}
+          onClick={() => setSessionDrawerOpen(false)}
+        />
+        <div className={`panel chat-session-panel ${sessionDrawerOpen ? "open" : ""}`}>
+          <div className="chat-session-header">
+            <h2><History size={16} /> Riwayat Chat</h2>
+            <button type="button" className="chat-new-session-btn" onClick={startNewSession} title="Chat baru">
+              <Plus size={14} /> Chat baru
+            </button>
+          </div>
+          <div className="chat-session-list">
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className={`chat-session-item ${s.id === activeSessionId ? "active" : ""}`}
+                onClick={() => switchSession(s.id)}
+              >
+                <div className="chat-session-info">
+                  <div className="chat-session-title">{s.title || "Chat baru"}</div>
+                  <div className="chat-session-meta">{formatSessionMeta(s)}</div>
+                </div>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <ConfirmButton className="chat-session-remove" title="Hapus sesi ini" onConfirm={() => deleteSession(s.id)}>
+                    <X size={13} />
+                  </ConfirmButton>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className={`panel chat-thread-panel ${dragActive ? "chat-drag-active" : ""}`}
           onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
         >
           <div className="chat-toolbar">
+            <button type="button" className="chat-session-toggle" onClick={() => setSessionDrawerOpen(true)}>
+              <History size={14} /> Riwayat
+            </button>
             {messages.length > 0 && (
-              <ConfirmButton
-                className="chat-clear-btn" onConfirm={clearHistory}
-                note="Menu yang sudah tersimpan ke Dashboard tidak ikut terhapus."
-              >
-                Hapus riwayat chat
-              </ConfirmButton>
+              <>
+                <ConfirmButton
+                  className="chat-clear-btn" onConfirm={() => deleteSession(activeSessionId)}
+                  note="Menu yang sudah tersimpan ke Dashboard tidak ikut terhapus."
+                >
+                  Hapus riwayat chat ini
+                </ConfirmButton>
+                {sessions.length > 1 && (
+                  <ConfirmButton
+                    className="chat-clear-btn" onConfirm={deleteAllHistory}
+                    note="Semua sesi chat akan dihapus. Menu yang sudah tersimpan ke Dashboard tidak ikut terhapus."
+                  >
+                    Hapus semua riwayat
+                  </ConfirmButton>
+                )}
+              </>
             )}
           </div>
           <div className="chat-thread">
