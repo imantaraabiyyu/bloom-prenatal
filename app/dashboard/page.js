@@ -11,12 +11,13 @@ import {
   Sprout, X, Check, AlertTriangle,
 } from "lucide-react";
 import {
-  TARGETS, NUTRIENT_META, NUTRIENT_ORDER,
-  LIMITS, LIMIT_META, LIMIT_ORDER, ALL_TRACKED_NUTRIENTS, ALL_TRACKED_META,
+  NUTRIENT_META, NUTRIENT_ORDER,
+  LIMIT_META, LIMIT_ORDER, ALL_TRACKED_NUTRIENTS, ALL_TRACKED_META,
   SAMPLE_MEAL_CSV, SAMPLE_VIT_CSV, DEFAULT_VITAMINS,
-  parseMealCsv, parseVitaminCsv, computeActiveNutrients, computeActiveLimitNutrients,
+  parseMealCsv, parseVitaminCsv, computeActiveTrackedNutrients,
   groupMealsByDay, dedupeMeals, todayISO,
-  statusForPct, limitStatusForPct, exceededLimitLabels, mergeExtraNutrients, buildExtraNutrientsMap,
+  statusForPct, statusForGoal, exceededGoalLabels, mergeExtraNutrients, buildExtraNutrientsMap,
+  resolveEffectiveGoals,
 } from "@/lib/nutrition";
 import { trimesterForDate } from "@/lib/pregnancy";
 
@@ -42,6 +43,7 @@ export default function Dashboard() {
   const [meals, setMeals] = useState([]);
   const [vitamins, setVitamins] = useState([]);
   const [vitaminChecks, setVitaminChecks] = useState({}); // { date: { vitaminId: true } }
+  const [goalRows, setGoalRows] = useState([]); // nutrient_goals rows -- see effectiveGoals below
   const [dayIndex, setDayIndex] = useState(0);
   const [extraDates, setExtraDates] = useState([]); // dates jumped-to via the date picker that have no data yet
   const [pendingJumpDate, setPendingJumpDate] = useState(null);
@@ -115,6 +117,14 @@ export default function Dashboard() {
         map[c.date][c.vitamin_id] = c.checked;
       });
       setVitaminChecks(map);
+
+      // nutrient goals (targets/limits) -- see effectiveGoals below. Seeded
+      // per-nutrient by app/dashboard/profile/page.js's "Konfigurasi nutrisi"
+      // section on first visit there; until then this is simply empty and
+      // resolveEffectiveGoals falls back to today's global defaults, same as
+      // every user saw before this feature existed.
+      const { data: goalData } = await supabase.from("nutrient_goals").select("*").eq("user_id", u.id);
+      setGoalRows(goalData || []);
 
       setLoading(false);
     })();
@@ -199,36 +209,42 @@ export default function Dashboard() {
   // nutrient targets below follow along automatically. Falls back to
   // Trimester 1 until HPHT/HPL is set (see the info note near the pills).
   const trimester = trimesterForDate(hpht, currentDate || todayISO());
-  const targets = TARGETS[trimester];
-  const activeNutrients = useMemo(() => computeActiveNutrients(meals), [meals]);
-  // LIMIT_ORDER mirror of activeNutrients above -- kept as its own list (not
-  // folded into activeNutrients) since it drives a separate "Batas harian"
-  // section, not the floor-type rings/trend/summary (see LIMIT_ORDER's own
-  // comment in lib/nutrition.js for why the two never mix).
-  const activeLimitNutrients = useMemo(() => computeActiveLimitNutrients(meals), [meals]);
+  // Every nutrient's target/limit, direction included -- a user's own
+  // nutrient_goals row (goalRows) when they have one, else today's global
+  // TARGETS/LIMITS default (same as every user saw before this feature
+  // existed). The single seam every render block below reads through
+  // instead of TARGETS/LIMITS/NUTRIENT_META/LIMIT_META directly, so a
+  // flipped direction (e.g. protein_g set to max-type) is reflected
+  // consistently everywhere at once.
+  const effectiveGoals = useMemo(() => resolveEffectiveGoals(goalRows, trimester), [goalRows, trimester]);
+  // Which of the 15 ALL_TRACKED_NUTRIENTS keys actually have logged data,
+  // split into floor-type ("ring"/target) vs ceiling-type ("batas harian"
+  // bar) groups by each key's CURRENT effectiveGoals direction -- not by
+  // fixed NUTRIENT_ORDER/LIMIT_ORDER membership, since a user can flip
+  // either way per nutrient. A flipped nutrient simply moves from one
+  // group/section to the other.
+  const activeTrackedNutrients = useMemo(() => computeActiveTrackedNutrients(meals), [meals]);
+  const activeNutrients = useMemo(
+    () => activeTrackedNutrients.filter((k) => effectiveGoals[k]?.goalType !== "max"),
+    [activeTrackedNutrients, effectiveGoals]
+  );
+  const activeLimitNutrients = useMemo(
+    () => activeTrackedNutrients.filter((k) => effectiveGoals[k]?.goalType === "max"),
+    [activeTrackedNutrients, effectiveGoals]
+  );
   const mealsByDay = useMemo(() => groupMealsByDay(meals), [meals]);
 
-  function dayTotals(date) {
+  // Sums every ALL_TRACKED_NUTRIENTS field for one day (meals + every
+  // checked vitamin that day) -- floor/ceiling direction is a rendering
+  // concern now (effectiveGoals), not a data-shape one, so this no longer
+  // needs two parallel NUTRIENT_ORDER-only/LIMIT_ORDER-only variants.
+  function dayNutrientTotals(date) {
     const base = mealsByDay[date] || {};
     const totals = {};
-    NUTRIENT_ORDER.forEach((n) => { totals[n] = base[n] || 0; });
+    ALL_TRACKED_NUTRIENTS.forEach((n) => { totals[n] = base[n] || 0; });
     const checks = vitaminChecks[date] || {};
     vitamins.forEach((v) => {
-      if (checks[v.id]) NUTRIENT_ORDER.forEach((n) => { if (v[n] != null) totals[n] += Number(v[n]); });
-    });
-    return totals;
-  }
-
-  // Ceiling-type ("batas harian") mirror of dayTotals above -- reads
-  // LIMIT_ORDER off the same mealsByDay cache (groupMealsByDay now sums
-  // both lists), plus every checked vitamin's LIMIT_ORDER fields.
-  function dayLimitTotals(date) {
-    const base = mealsByDay[date] || {};
-    const totals = {};
-    LIMIT_ORDER.forEach((n) => { totals[n] = base[n] || 0; });
-    const checks = vitaminChecks[date] || {};
-    vitamins.forEach((v) => {
-      if (checks[v.id]) LIMIT_ORDER.forEach((n) => { if (v[n] != null) totals[n] += Number(v[n]); });
+      if (checks[v.id]) ALL_TRACKED_NUTRIENTS.forEach((n) => { if (v[n] != null) totals[n] += Number(v[n]); });
     });
     return totals;
   }
@@ -246,19 +262,18 @@ export default function Dashboard() {
     return merged;
   }
 
-  const totals = currentDate ? dayTotals(currentDate) : {};
-  const limitTotals = currentDate ? dayLimitTotals(currentDate) : {};
+  const totals = currentDate ? dayNutrientTotals(currentDate) : {};
   // Single source of truth (lib/nutrition.js) shared with the dinner-reminder
   // trigger (app/api/cron/reminders/route.js) — same "what counts as
   // exceeded" math on both the Dashboard and the notification.
-  const exceededToday = exceededLimitLabels(limitTotals);
+  const exceededToday = exceededGoalLabels(totals, effectiveGoals);
   const todaysExtraTotals = currentDate ? extraTotals(currentDate) : {};
   const datesWithMeals = dates.filter((d) => meals.some((r) => r.date === d));
   const todaysMeals = currentDate ? meals.filter((r) => r.date === currentDate) : [];
   const waterTotal = totals.water_ml || 0;
-  const waterTarget = targets.water_ml;
+  const waterTarget = effectiveGoals.water_ml.targetValue;
   const waterPct = waterTarget ? (waterTotal / waterTarget) * 100 : 0;
-  const waterStatus = statusForPct(waterPct);
+  const waterStatus = statusForGoal(waterPct, effectiveGoals.water_ml.goalType);
 
   // ---------------- actions ----------------
   async function handleMealFile(file) {
@@ -461,8 +476,11 @@ export default function Dashboard() {
 
   const visibleNutrients = showAll ? activeNutrients : activeNutrients.slice(0, 5);
 
-  // pcts for summary
-  const pcts = activeNutrients.map((n) => (targets[n] ? (totals[n] || 0) / targets[n] * 100 : 0));
+  // pcts for summary -- floor-type (min-goal) nutrients only, same as
+  // before this feature: a mixed floor/ceiling average wouldn't mean
+  // anything coherent (100% of a ceiling-type goal is "at the limit", not
+  // "done"), so this summary stays scoped to activeNutrients (min-type).
+  const pcts = activeNutrients.map((n) => (effectiveGoals[n].targetValue ? (totals[n] || 0) / effectiveGoals[n].targetValue * 100 : 0));
   const metCount = pcts.filter((p) => p >= 100).length;
   const avg = pcts.length ? pcts.reduce((a, b) => a + Math.min(b, 100), 0) / pcts.length : 0;
   const overallStatus = statusForPct(avg);
@@ -471,7 +489,7 @@ export default function Dashboard() {
     : overallStatus.key === "mid" ? "Sudah lumayan, tinggal sedikit lagi"
     : "Masih ada beberapa nutrisi yang perlu dilengkapi";
   const lowestIdx = pcts.length ? pcts.indexOf(Math.min(...pcts)) : -1;
-  const lowestLabel = lowestIdx >= 0 ? NUTRIENT_META[activeNutrients[lowestIdx]].label : "—";
+  const lowestLabel = lowestIdx >= 0 ? effectiveGoals[activeNutrients[lowestIdx]].label : "—";
 
   // rings geometry — cap concurrent rings at 3 (same as Apple Watch's activity
   // rings): color now marks status (tercukupi/hampir/kurang), not identity, but
@@ -483,9 +501,9 @@ export default function Dashboard() {
 
   // trend geometry
   const trendData = datesWithMeals.map((d) => {
-    const t = dayTotals(d);
+    const t = dayNutrientTotals(d);
     const out = { date: d };
-    activeNutrients.forEach((n) => { out[n] = targets[n] ? (t[n] || 0) / targets[n] * 100 : 0; });
+    activeNutrients.forEach((n) => { out[n] = effectiveGoals[n].targetValue ? (t[n] || 0) / effectiveGoals[n].targetValue * 100 : 0; });
     return out;
   });
   const tw = Math.max(560, trendData.length * 90), th = 300;
@@ -499,15 +517,18 @@ export default function Dashboard() {
   const gridTicks = [0, 25, 50, 75, 100, 125].filter((v) => v <= maxVal);
 
   // "batas harian" trend geometry — structurally mirrors the trend geometry
-  // above but computed from dayLimitTotals/LIMITS (ceiling-type, % of a daily
-  // limit) instead of dayTotals/targets (floor-type, % of a daily target).
-  // Kept as its own parallel block rather than a shared/generic helper — see
-  // LIMIT_ORDER's own comment in lib/nutrition.js for why floor and ceiling
-  // stay separate instead of averaging together.
+  // above but computed from activeLimitNutrients/effectiveGoals (ceiling-
+  // type, % of a daily limit) instead of activeNutrients/effectiveGoals
+  // (floor-type, % of a daily target). Kept as its own parallel block rather
+  // than a shared/generic helper — see LIMIT_ORDER's own comment in
+  // lib/nutrition.js for why floor and ceiling stay separate instead of
+  // averaging together (still true even though direction is now per-user:
+  // a day's mixed floor+ceiling trend still wouldn't mean anything coherent
+  // averaged onto one chart).
   const limitTrendData = datesWithMeals.map((d) => {
-    const t = dayLimitTotals(d);
+    const t = dayNutrientTotals(d);
     const out = { date: d };
-    activeLimitNutrients.forEach((n) => { out[n] = LIMITS[n] ? (t[n] || 0) / LIMITS[n] * 100 : 0; });
+    activeLimitNutrients.forEach((n) => { out[n] = effectiveGoals[n].targetValue ? (t[n] || 0) / effectiveGoals[n].targetValue * 100 : 0; });
     return out;
   });
   const ltw = Math.max(560, limitTrendData.length * 90), lth = 300;
@@ -808,10 +829,10 @@ export default function Dashboard() {
                   const radius = baseRadius + i * ringGap;
                   const circumference = 2 * Math.PI * radius;
                   const value = totals[key] || 0;
-                  const target = targets[key];
+                  const target = effectiveGoals[key].targetValue;
                   const frac = target ? value / target : 0;
                   const drawPct = Math.min(frac, 1);
-                  const status = statusForPct(frac * 100);
+                  const status = statusForGoal(frac * 100, effectiveGoals[key].goalType);
                   return (
                     <g key={key}>
                       <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(243,237,233,0.09)" strokeWidth={strokeWidth} />
@@ -832,16 +853,16 @@ export default function Dashboard() {
 
               <div className="ring-legend">
                 {ringNutrients.map((key) => {
-                  const meta = NUTRIENT_META[key];
+                  const goal = effectiveGoals[key];
                   const value = totals[key] || 0;
-                  const target = targets[key];
+                  const target = goal.targetValue;
                   const pct = target ? (value / target) * 100 : 0;
-                  const status = statusForPct(pct);
+                  const status = statusForGoal(pct, goal.goalType);
                   return (
                     <div className="ring-legend-item" key={key}>
                       <span className="ring-legend-dot" style={{ background: status.color }} />
-                      <span className="ring-legend-name">{meta.label}</span>
-                      <span className="ring-legend-value">{Math.round(value)}/{target}{meta.unit}</span>
+                      <span className="ring-legend-name">{goal.label}</span>
+                      <span className="ring-legend-value">{Math.round(value)}/{target}{goal.unit}</span>
                       <span className="ring-legend-pct" style={{ color: status.color }}>{Math.round(pct)}%</span>
                     </div>
                   );
@@ -898,19 +919,35 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Nutrisi tambahan (custom, di luar ALL_TRACKED_NUTRIENTS) dari vitamin yang dicentang + menu hari ini */}
+        {/* Nutrisi tambahan (custom, di luar ALL_TRACKED_NUTRIENTS) dari vitamin yang dicentang + menu hari ini.
+            Slug dengan goal tersimpan (diatur di Profil -> Konfigurasi nutrisi)
+            render sebagai bar progres; yang belum diatur tetap chip biasa,
+            sama seperti sebelum fitur ini ada. */}
         {currentDate && Object.keys(todaysExtraTotals).length > 0 && (
           <div className="panel full">
             <h3>
               Nutrisi lain — {currentDate}
               <HelpTip>
-                Nutrisi tambahan — belum ada target harian bawaan untuk ini, jadi hanya ditampilkan sebagai catatan.
+                Nutrisi tambahan — atur target/batasnya di Profil (Konfigurasi nutrisi) kalau mau
+                dipantau progresnya, kalau tidak cuma ditampilkan sebagai catatan.
               </HelpTip>
             </h3>
             <div className="extra-today-list">
-              {Object.entries(todaysExtraTotals).map(([slug, e]) => (
-                <span className="extra-today-chip" key={slug}>{e.label} {Math.round(e.value * 100) / 100}{e.unit}</span>
-              ))}
+              {Object.entries(todaysExtraTotals).map(([slug, e]) => {
+                const goal = effectiveGoals[slug];
+                if (!goal?.isCustom) {
+                  return <span className="extra-today-chip" key={slug}>{e.label} {Math.round(e.value * 100) / 100}{e.unit}</span>;
+                }
+                const pct = goal.targetValue ? (e.value / goal.targetValue) * 100 : 0;
+                const status = statusForGoal(pct, goal.goalType);
+                return (
+                  <div className="nutrient-row extra-today-goal-row" key={slug}>
+                    <span className="nutrient-name">{e.label}</span>
+                    <div className="nutrient-bar-track"><div className={`nutrient-bar-fill${pct > 102 ? " over" : ""}`} style={{ width: `${Math.min(pct, 100)}%`, background: status.color }} /></div>
+                    <span className="nutrient-value">{Math.round(e.value * 100) / 100}/{goal.targetValue}{goal.unit} · {Math.round(pct)}% · {status.label}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -975,15 +1012,15 @@ export default function Dashboard() {
           <div className="panel full" id="nutrient-detail">
             <h2>{currentDate} — rincian per nutrisi</h2>
             {visibleNutrients.map((key) => {
-              const meta = NUTRIENT_META[key];
+              const goal = effectiveGoals[key];
               const value = totals[key] || 0;
-              const target = targets[key];
+              const target = goal.targetValue;
               const pct = target ? (value / target) * 100 : 0;
               return (
                 <div className="nutrient-row" key={key}>
-                  <span className="nutrient-name">{meta.label}</span>
-                  <div className="nutrient-bar-track"><div className={`nutrient-bar-fill${pct > 102 ? " over" : ""}`} style={{ width: `${Math.min(pct, 100)}%`, background: meta.color }} /></div>
-                  <span className="nutrient-value">{Math.round(value)}/{target}{meta.unit} · {Math.round(pct)}%</span>
+                  <span className="nutrient-name">{goal.label}</span>
+                  <div className="nutrient-bar-track"><div className={`nutrient-bar-fill${pct > 102 ? " over" : ""}`} style={{ width: `${Math.min(pct, 100)}%`, background: ALL_TRACKED_META[key].color }} /></div>
+                  <span className="nutrient-value">{Math.round(value)}/{target}{goal.unit} · {Math.round(pct)}%</span>
                 </div>
               );
             })}
@@ -1017,7 +1054,13 @@ export default function Dashboard() {
                   <text key={d.date} x={xPos(i)} y={th - padB + 18} textAnchor="middle" fill="#a591a3" fontSize="10">{d.date}</text>
                 ))}
                 {activeNutrients.map((n) => {
-                  const meta = NUTRIENT_META[n];
+                  // ALL_TRACKED_META (not NUTRIENT_META) -- activeNutrients is
+                  // now filtered by each key's CURRENT effectiveGoals
+                  // direction, not fixed NUTRIENT_ORDER membership, so a
+                  // flipped-to-min key normally in LIMIT_META (e.g. sodium_mg)
+                  // can land here too; NUTRIENT_META alone would be undefined
+                  // for it.
+                  const meta = ALL_TRACKED_META[n];
                   const points = trendData.map((d, i) => `${xPos(i)},${yPos(d[n])}`).join(" ");
                   return (
                     <g key={n}>
@@ -1030,7 +1073,7 @@ export default function Dashboard() {
             </div>
             <div className="legend">
               {activeNutrients.map((n) => (
-                <div className="legend-item" key={n}><span className="legend-dot" style={{ background: NUTRIENT_META[n].color }} />{NUTRIENT_META[n].label}</div>
+                <div className="legend-item" key={n}><span className="legend-dot" style={{ background: ALL_TRACKED_META[n].color }} />{effectiveGoals[n].label}</div>
               ))}
             </div>
           </div>
@@ -1050,16 +1093,16 @@ export default function Dashboard() {
               </HelpTip>
             </h2>
             {activeLimitNutrients.map((key) => {
-              const meta = LIMIT_META[key];
-              const value = limitTotals[key] || 0;
-              const limit = LIMITS[key];
+              const goal = effectiveGoals[key];
+              const value = totals[key] || 0;
+              const limit = goal.targetValue;
               const pct = limit ? (value / limit) * 100 : 0;
-              const status = limitStatusForPct(pct);
+              const status = statusForGoal(pct, goal.goalType);
               return (
                 <div className="nutrient-row" key={key}>
-                  <span className="nutrient-name">{meta.label}</span>
+                  <span className="nutrient-name">{goal.label}</span>
                   <div className="nutrient-bar-track"><div className={`nutrient-bar-fill${pct > 100 ? " over" : ""}`} style={{ width: `${Math.min(pct, 100)}%`, background: status.color }} /></div>
-                  <span className="nutrient-value">{Math.round(value)}/{limit}{meta.unit} · {Math.round(pct)}% · {status.label}</span>
+                  <span className="nutrient-value">{Math.round(value)}/{limit}{goal.unit} · {Math.round(pct)}% · {status.label}</span>
                 </div>
               );
             })}
@@ -1067,10 +1110,11 @@ export default function Dashboard() {
         )}
 
         {/* Tren batas harian — structurally mirrors the "Tren dari hari ke
-            hari" trend above, computed from limitTrendData/LIMITS instead of
-            trendData/targets (see the geometry block near the top of this
-            component). Deliberately a parallel block, not a shared/generic
-            component with the floor-type trend. */}
+            hari" trend above, computed from limitTrendData/effectiveGoals
+            (ceiling-type) instead of trendData/effectiveGoals (floor-type)
+            (see the geometry block near the top of this component).
+            Deliberately a parallel block, not a shared/generic component
+            with the floor-type trend. */}
         {datesWithMeals.length > 1 && activeLimitNutrients.length > 0 && (
           <div className="panel full">
             <h3>
@@ -1094,7 +1138,11 @@ export default function Dashboard() {
                   <text key={d.date} x={lxPos(i)} y={lth - lpadB + 18} textAnchor="middle" fill="#a591a3" fontSize="10">{d.date}</text>
                 ))}
                 {activeLimitNutrients.map((n) => {
-                  const meta = LIMIT_META[n];
+                  // ALL_TRACKED_META (not LIMIT_META) -- same reasoning as the
+                  // floor-type trend above: activeLimitNutrients can now
+                  // include a flipped-to-max key normally in NUTRIENT_META
+                  // (e.g. protein_g), which LIMIT_META alone wouldn't have.
+                  const meta = ALL_TRACKED_META[n];
                   const points = limitTrendData.map((d, i) => `${lxPos(i)},${lyPos(d[n])}`).join(" ");
                   return (
                     <g key={n}>
@@ -1107,7 +1155,7 @@ export default function Dashboard() {
             </div>
             <div className="legend">
               {activeLimitNutrients.map((n) => (
-                <div className="legend-item" key={n}><span className="legend-dot" style={{ background: LIMIT_META[n].color }} />{LIMIT_META[n].label}</div>
+                <div className="legend-item" key={n}><span className="legend-dot" style={{ background: ALL_TRACKED_META[n].color }} />{effectiveGoals[n].label}</div>
               ))}
             </div>
           </div>
@@ -1122,8 +1170,8 @@ export default function Dashboard() {
                 <thead><tr><th>Tanggal</th><th style={{ width: "55%" }}>Rata-rata tercapai</th><th>Status</th></tr></thead>
                 <tbody>
                   {datesWithMeals.slice().reverse().map((d) => {
-                    const t = dayTotals(d);
-                    const p = activeNutrients.map((n) => (targets[n] ? (t[n] || 0) / targets[n] * 100 : 0));
+                    const t = dayNutrientTotals(d);
+                    const p = activeNutrients.map((n) => (effectiveGoals[n].targetValue ? (t[n] || 0) / effectiveGoals[n].targetValue * 100 : 0));
                     const a = p.length ? p.reduce((x, y) => x + Math.min(y, 100), 0) / p.length : 0;
                     const st = statusForPct(a);
                     return (
