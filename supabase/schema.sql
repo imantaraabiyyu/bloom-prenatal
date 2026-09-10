@@ -368,3 +368,33 @@ alter table public.meal_fact_history enable row level security;
 -- Sengaja tanpa policy apa pun -- RLS aktif + nol policy berarti default-deny
 -- untuk role anon/authenticated; cuma service-role client (bypass RLS) yang
 -- pernah baca/tulis tabel ini.
+
+-- 13) Target/batas gizi per pengguna (fixed ATAU custom/extra), lihat
+-- lib/nutrition.js's resolveEffectiveGoals, app/dashboard/profile/page.js's
+-- "Konfigurasi nutrisi" section, dan setiap tempat yang tadinya membaca
+-- TARGETS/LIMITS langsung (Dashboard, Gemini chat, cron pengingat). Satu
+-- baris per (user, nutrient_key) -- nutrient_key salah satu dari
+-- ALL_TRACKED_NUTRIENTS (is_custom=false, di-seed otomatis saat pengguna
+-- pertama kali buka bagian ini di Profil) ATAU slug custom dari
+-- extra_nutrients (is_custom=true, ditambahkan manual).
+create table if not exists public.nutrient_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  nutrient_key text not null,
+  label text not null,
+  unit text not null default '',
+  goal_type text not null check (goal_type in ('min','max')),
+  target_value numeric not null check (target_value > 0),
+  is_custom boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, nutrient_key)
+);
+create index if not exists nutrient_goals_user_idx on public.nutrient_goals (user_id);
+
+alter table public.nutrient_goals enable row level security;
+
+create policy "nutrient_goals: owner select" on public.nutrient_goals for select using (auth.uid() = user_id);
+create policy "nutrient_goals: owner insert" on public.nutrient_goals for insert with check (auth.uid() = user_id);
+create policy "nutrient_goals: owner update" on public.nutrient_goals for update using (auth.uid() = user_id);
+create policy "nutrient_goals: owner delete" on public.nutrient_goals for delete using (auth.uid() = user_id);

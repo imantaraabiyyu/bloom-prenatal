@@ -8,7 +8,7 @@ import {
   pickFallbackNudge, pickMealFactFallback, sumReminderResults, buildLimitWarningClause,
   WEIGHT_NUDGE_TEXT,
 } from "@/lib/reminderLogic";
-import { todayISOInTimeZone, LIMIT_ORDER, groupLimitTotalsByUser, mergeUserTotals, exceededLimitLabels } from "@/lib/nutrition";
+import { todayISOInTimeZone, ALL_TRACKED_NUTRIENTS, groupLimitTotalsByUser, mergeUserTotals, exceededGoalLabels, resolveEffectiveGoals } from "@/lib/nutrition";
 import { computeGestationalAge, trimesterForWeeks, addDays } from "@/lib/pregnancy";
 
 // How far back the morning slot's "belum timbang" check looks -- 7 days
@@ -85,6 +85,18 @@ export async function GET(request) {
     .in("user_id", userIds);
   const profileByUser = new Map((profileRows || []).map((p) => [p.user_id, p]));
 
+  // Per-user nutrient goal overrides (see lib/nutrition.js's
+  // resolveEffectiveGoals) -- only the dinner slot's exceeded-limit check
+  // needs these today, but fetched here alongside profileByUser (not
+  // gated by kind) since it's one cheap admin-client query either way and
+  // keeps this grouping next to the profile data it pairs with.
+  const { data: goalRowsAll } = await supabase.from("nutrient_goals").select("*").in("user_id", userIds);
+  const goalsByUser = new Map();
+  (goalRowsAll || []).forEach((g) => {
+    if (!goalsByUser.has(g.user_id)) goalsByUser.set(g.user_id, []);
+    goalsByUser.get(g.user_id).push(g);
+  });
+
   // Only the dinner slot needs to know who's already logged today -- the
   // other 3 slots are unconditional, so skip these queries entirely for them
   // (no point paying for a scan the content doesn't use).
@@ -95,24 +107,28 @@ export async function GET(request) {
   // check below (a user who logged everything can still be over a limit).
   let limitTotalsByUser = {};
   if (kind === "dinner") {
-    const limitCols = LIMIT_ORDER.join(",");
+    // ALL_TRACKED_NUTRIENTS, not just the fixed 5 LIMIT_ORDER columns --
+    // which of these count as a "limit" is per-user now (resolveEffectiveGoals),
+    // so every tracked column needs summing; exceededGoalLabels below decides
+    // which ones actually matter for each user.
+    const cols = ALL_TRACKED_NUTRIENTS.join(",");
     const [{ data: mealRows }, { data: vitaminCheckRows }] = await Promise.all([
-      supabase.from("meals").select(`user_id, ${limitCols}`).eq("date", today).in("user_id", userIds),
+      supabase.from("meals").select(`user_id, ${cols}`).eq("date", today).in("user_id", userIds),
       supabase.from("vitamin_checks").select("user_id, vitamin_id").eq("date", today).eq("checked", true).in("user_id", userIds),
     ]);
     mealUserIds = distinctUserIds(mealRows);
     vitaminUserIds = distinctUserIds(vitaminCheckRows);
 
     // vitamin_checks only names which vitamin_id was checked -- need each of
-    // those vitamins' own limit-column values to actually sum anything.
+    // those vitamins' own tracked columns to actually sum anything.
     const checkedVitaminIds = [...new Set((vitaminCheckRows || []).map((c) => c.vitamin_id))];
     let vitaminRows = [];
     if (checkedVitaminIds.length > 0) {
-      const { data } = await supabase.from("vitamins").select(`id, ${limitCols}`).in("id", checkedVitaminIds);
+      const { data } = await supabase.from("vitamins").select(`id, ${cols}`).in("id", checkedVitaminIds);
       vitaminRows = data || [];
     }
     const vitaminById = new Map(vitaminRows.map((v) => [v.id, v]));
-    // Re-attach each check row's own user_id to its vitamin's limit columns
+    // Re-attach each check row's own user_id to its vitamin's tracked columns
     // (one vitamins row, looked up per check, since the same catalog vitamin
     // could in principle be checked by more than one check row).
     const vitaminRowsWithUser = (vitaminCheckRows || [])
@@ -122,7 +138,11 @@ export async function GET(request) {
       })
       .filter(Boolean);
 
-    limitTotalsByUser = mergeUserTotals(groupLimitTotalsByUser(mealRows || []), groupLimitTotalsByUser(vitaminRowsWithUser));
+    limitTotalsByUser = mergeUserTotals(
+      groupLimitTotalsByUser(mealRows || [], ALL_TRACKED_NUTRIENTS),
+      groupLimitTotalsByUser(vitaminRowsWithUser, ALL_TRACKED_NUTRIENTS),
+      ALL_TRACKED_NUTRIENTS
+    );
   }
 
   // Only the morning slot carries the weekly "belum timbang" nudge -- same
@@ -212,7 +232,10 @@ export async function GET(request) {
     let body;
     if (kind === "dinner") {
       const { missingMeal, missingVitamin } = pickMissing(mealUserIds, vitaminUserIds, userId);
-      const exceededLabels = exceededLimitLabels(limitTotalsByUser[userId] || {});
+      // trimester can be null (no profiles.hpht set) -- same "t1" fallback
+      // convention as lib/pregnancy.js's trimesterForDate uses everywhere else.
+      const userEffectiveGoals = resolveEffectiveGoals(goalsByUser.get(userId) || [], trimester || "t1");
+      const exceededLabels = exceededGoalLabels(limitTotalsByUser[userId] || {}, userEffectiveGoals);
       // Both already logged AND no daily limit exceeded -- nothing to nudge
       // about. A user who logged everything but went over a limit still
       // gets a heads-up (the `exceededLabels.length === 0` clause is new).
