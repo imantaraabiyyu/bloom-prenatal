@@ -89,23 +89,23 @@ export async function POST(request) {
   const supabase = getSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
-    return NextResponse.json({ error: "Kamu perlu login dulu." }, { status: 401 });
+    return NextResponse.json({ error: "Sesi kamu sudah habis, silakan login ulang.", code: "auth" }, { status: 401 });
   }
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Body request tidak valid." }, { status: 400 });
+    return NextResponse.json({ error: "Body request tidak valid.", code: "invalid" }, { status: 400 });
   }
 
   const message = typeof body?.message === "string" ? body.message.trim().slice(0, MAX_MESSAGE_LENGTH) : "";
   const image = body?.image?.base64 && body?.image?.mimeType ? body.image : null;
   if (!message && !image) {
-    return NextResponse.json({ error: "Tulis sesuatu atau lampirkan foto dulu." }, { status: 400 });
+    return NextResponse.json({ error: "Tulis sesuatu atau lampirkan foto dulu.", code: "invalid" }, { status: 400 });
   }
   if (image && image.base64.length > MAX_BASE64_LENGTH) {
-    return NextResponse.json({ error: "Foto terlalu besar. Coba foto lain atau perkecil dulu." }, { status: 413 });
+    return NextResponse.json({ error: "Foto terlalu besar. Coba foto lain atau perkecil dulu.", code: "too_large" }, { status: 413 });
   }
 
   const history = Array.isArray(body?.history)
@@ -153,10 +153,11 @@ export async function POST(request) {
         // it gets here; a 429 never retries at all (see the comment on
         // RETRYABLE_STATUS there) — either way, this is what's shown once
         // Gemini itself won't cooperate.
-        send({
-          type: "error",
-          error: isGeminiBusyError(e) ? GEMINI_BUSY_MESSAGE : "Ada gangguan pas memproses pesannya. Coba lagi sebentar lagi.",
-        });
+        // `code` lets the client pick the right notice (lib/chatErrors.js)
+        // without string-matching the message.
+        send(isGeminiBusyError(e)
+          ? { type: "error", code: "busy", error: GEMINI_BUSY_MESSAGE }
+          : { type: "error", code: "generic", error: "Ada gangguan pas memproses pesannya. Coba lagi sebentar lagi." });
       } finally {
         controller.close();
       }
