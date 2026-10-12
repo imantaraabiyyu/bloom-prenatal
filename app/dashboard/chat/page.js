@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import ConfirmButton from "@/components/ConfirmButton";
+import { classifyChatError, buildBubbleCopyText } from "@/lib/chatErrors";
 import {
   ALL_TRACKED_NUTRIENTS, ALL_TRACKED_META,
   todayISO, vitaminItemToRow, buildExtraNutrientsMap,
@@ -89,6 +90,7 @@ const VERDICT_BADGES = {
 // includes past photos (those aren't stored, see chat_messages in
 // supabase/schema.sql), just a placeholder so the model knows one was sent.
 function toHistoryEntry(m) {
+  if (m.isError) return null;
   if (m.analysis?.category === "vitamin") return { role: m.role, text: formatVitaminAnalysisText(m.analysis) };
   if (m.analysis) return { role: m.role, text: formatAnalysisText(m.analysis) };
   if (m.text) return { role: m.role, text: m.text };
@@ -97,6 +99,29 @@ function toHistoryEntry(m) {
 }
 
 let nextTypingId = 1;
+
+// Clipboard write with a fallback for non-secure contexts / older mobile
+// webviews where navigator.clipboard is unavailable.
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
 
 export default function ChatPage() {
   const router = useRouter();
@@ -115,6 +140,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false); // tap-to-toggle on mobile; CSS :hover also reveals it on desktop
+  const [copiedId, setCopiedId] = useState(null); // bubble id showing the "Tersalin ✓" label
   const threadEndRef = useRef(null);
   const attachMenuRef = useRef(null);
 
@@ -261,6 +287,27 @@ export default function ChatPage() {
       .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)));
   }
 
+  // Error notices are local-only (never inserted into chat_messages) so a
+  // transient failure doesn't pollute history or Gemini's context.
+  function showErrorNotice({ status, code, serverMessage, networkFailure }) {
+    const { kind, message, needsLogin } = classifyChatError({ status, code, serverMessage, networkFailure });
+    setMessages((prev) => [...prev, {
+      id: `error-${nextTypingId++}`, role: "assistant", isError: true, errorKind: kind, needsLogin, text: message,
+    }]);
+  }
+
+  // Tap-to-copy: ignores taps on buttons/links inside the bubble and taps
+  // that finish a text selection (so long-press/drag selecting still works).
+  async function handleBubbleClick(e, id, copyText) {
+    if (!copyText) return;
+    if (e.target.closest("button, a, input, label")) return;
+    if (window.getSelection?.()?.toString()) return;
+    if (await copyToClipboard(copyText)) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    }
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text && !pendingImage) return;
@@ -304,7 +351,7 @@ export default function ChatPage() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setMessages((prev) => prev.filter((m) => m.id !== streamId));
-        await saveMessage({ role: "assistant", text: `⚠ ${data.error || "Ada gangguan, coba lagi ya."}`, had_image: false });
+        showErrorNotice({ status: res.status, code: data.code, serverMessage: data.error });
         return;
       }
 
@@ -314,6 +361,7 @@ export default function ChatPage() {
       let buffer = "";
       let finalResult = null;
       let streamError = null;
+      let streamErrorCode = null;
 
       function handleLine(line) {
         if (!line.trim()) return;
@@ -321,7 +369,7 @@ export default function ChatPage() {
         try { evt = JSON.parse(line); } catch { return; }
         if (evt.type === "delta") appendDelta(evt.text);
         else if (evt.type === "done") finalResult = evt.result;
-        else if (evt.type === "error") streamError = evt.error;
+        else if (evt.type === "error") { streamError = evt.error; streamErrorCode = evt.code; }
       }
 
       while (true) {
@@ -337,9 +385,9 @@ export default function ChatPage() {
       setMessages((prev) => prev.filter((m) => m.id !== streamId));
 
       if (streamError) {
-        await saveMessage({ role: "assistant", text: `⚠ ${streamError}`, had_image: false });
+        showErrorNotice({ code: streamErrorCode, serverMessage: streamError });
       } else if (!finalResult) {
-        await saveMessage({ role: "assistant", text: "⚠ Ada gangguan, coba lagi ya.", had_image: false });
+        showErrorNotice({});
       } else if (
         (finalResult.category === "food" && finalResult.meal) ||
         (finalResult.category === "vitamin" && finalResult.vitamins?.length > 0)
@@ -353,7 +401,9 @@ export default function ChatPage() {
       }
     } catch (e) {
       setMessages((prev) => prev.filter((m) => m.id !== streamId));
-      await saveMessage({ role: "assistant", text: "⚠ Ada gangguan, coba kirim ulang beberapa saat lagi.", had_image: false });
+      // fetch() itself rejects (TypeError) when the request never reached the
+      // server, e.g. offline; anything else thrown here is a generic failure.
+      showErrorNotice({ networkFailure: e instanceof TypeError });
     } finally {
       setSending(false);
       if (imageUrl) URL.revokeObjectURL(imageUrl);
@@ -583,11 +633,36 @@ export default function ChatPage() {
             {messages.length === 0 && (
               <div className="chat-empty">Belum ada percakapan. Sapa Bloom atau kirim foto makanan di bawah untuk mulai 🌱</div>
             )}
-            {messages.map((m) => (
+            {messages.map((m) => {
+              const copyText = buildBubbleCopyText({
+                text: m.text,
+                analysisText: m.analysis ? (m.analysis.category === "vitamin" ? formatVitaminAnalysisText(m.analysis) : formatAnalysisText(m.analysis)) : "",
+                verdictLabel: m.analysis?.category === "food" ? VERDICT_BADGES[m.analysis.verdict]?.label : "",
+                verdictReason: m.analysis?.verdict_reason,
+                streaming: m.streaming,
+                isError: m.isError,
+              });
+              return (
               <div className={`chat-msg-row ${m.role}`} key={m.id}>
-                <div className="chat-bubble">
+                <div
+                  className={`chat-bubble ${copyText ? "chat-bubble-copyable" : ""} ${m.isError ? "chat-bubble-error" : ""}`}
+                  {...(copyText ? {
+                    role: "button", tabIndex: 0, title: "Ketuk untuk menyalin",
+                    onClick: (e) => handleBubbleClick(e, m.id, copyText),
+                    onKeyDown: (e) => { if (e.key === "Enter" && e.target === e.currentTarget) handleBubbleClick(e, m.id, copyText); },
+                  } : {})}
+                >
                   {m.streaming ? (
                     <span>{m.text}<span className="chat-cursor" /></span>
+                  ) : m.isError ? (
+                    <>
+                      <div className="chat-error-text"><AlertTriangle size={13} /> <span>{m.text}</span></div>
+                      {m.needsLogin && (
+                        <div className="chat-bubble-actions">
+                          <Link href="/login" className="chat-relogin-btn">Login ulang</Link>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <>
                       {m.imageUrl && <img className="chat-bubble-image" src={m.imageUrl} alt="" />}
@@ -646,9 +721,11 @@ export default function ChatPage() {
                       )}
                     </>
                   )}
+                  {copiedId === m.id && <span className="chat-copied-tag"><Check size={11} /> Tersalin</span>}
                 </div>
               </div>
-            ))}
+              );
+            })}
             <div ref={threadEndRef} />
           </div>
 
